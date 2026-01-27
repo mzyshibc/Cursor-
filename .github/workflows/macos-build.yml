@@ -3,23 +3,36 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+
 jobs:
   build-macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install dependencies (robust)
+        shell: bash
         run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller PyQt6 requests psutil jwt cryptography lxml DrissionPage pyinstaller-hooks-contrib
+          set -e
+          python -m pip install --upgrade pip setuptools wheel
+
+          PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
+          for i in 1 2 3; do
+            echo "Attempt $i: installing deps..."
+            python -m pip install --no-progress-bar --default-timeout=120 $PKGS && break || {
+              echo "pip install failed, retrying..."
+              sleep 10
+            }
+          done
 
       - name: Unpack sources
         shell: bash
         run: |
+          set -e
           if [ -f src.zip ]; then
             echo "Unpacking via ditto..."
             ditto -x -k src.zip .
@@ -37,10 +50,8 @@ jobs:
               cp -R "$FOUND_DIR"/. src/
             else
               echo "main.py not found anywhere after unpack."
-              echo "Directory listing (top-level):"
-              ls -la
-              echo "Find results:"
-              find . -maxdepth 25 -type f -name main.py
+              echo "Directory listing (top-level):"; ls -la
+              echo "Find results:"; find . -maxdepth 25 -type f -name main.py
               exit 1
             fi
           fi
