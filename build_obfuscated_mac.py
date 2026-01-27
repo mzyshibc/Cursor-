@@ -62,54 +62,54 @@ def main():
     obfuscated_src = project_root / "obfuscated_src"
     src_dir = project_root / "src"
     entry = obfuscated_src / "main.py" if (obfuscated_src / "main.py").exists() else src_dir / "main.py"
+    entry_dir = entry.parent
+    minimal_mode = not ((entry_dir / "ui").exists() or (entry_dir / "core").exists())
     name = "CursorProManager"
     icon_icns = project_root / "src" / "assets" / "icon.icns"
-    cmd = [
-        "pyinstaller",
-        "--noconfirm",
-        "--onedir",
-        "--windowed",
-        f"--name={name}",
-        f"--paths={(obfuscated_src if entry.parent == obfuscated_src else src_dir)}",
-        "--hidden-import=PyQt6",
-        "--hidden-import=requests",
-        "--hidden-import=ui.about_widget",
-        "--hidden-import=ui.settings_widget",
-        "--hidden-import=ui.account_pool_widget",
-        "--hidden-import=ui.email_config_widget",
-        "--hidden-import=ui.registration_widget",
-        "--hidden-import=ui.account_detail_dialog",
-        "--hidden-import=ui.add_account_dialog",
-        "--hidden-import=core.registration_engine",
-        "--hidden-import=core.account_manager",
-        "--hidden-import=core.auth_injector",
-        "--hidden-import=core.backend_api",
-        "--hidden-import=core.cursor_api",
-        "--hidden-import=core.email_handler",
-        "--hidden-import=core.legacy_email_handler",
-        "--hidden-import=core.drission_modules",
-        "--hidden-import=core.drission_modules.account_storage",
-        "--hidden-import=core.drission_modules.auto_register",
-        "--hidden-import=core.drission_modules.browser_manager",
-        "--hidden-import=core.drission_modules.card_pool_manager",
-        "--hidden-import=core.drission_modules.country_codes",
-        "--hidden-import=core.drission_modules.cursor_switcher",
-        "--hidden-import=core.drission_modules.deep_token_getter",
-        "--hidden-import=core.drission_modules.email_verification",
-        "--hidden-import=core.drission_modules.machine_id_generator",
-        "--hidden-import=core.drission_modules.payment_handler",
-        "--hidden-import=core.drission_modules.phone_handler",
-        "--hidden-import=core.drission_modules.registration_steps",
-        "--hidden-import=core.drission_modules.token_handler",
-        "--hidden-import=core.drission_modules.turnstile_handler",
-        "--hidden-import=core.drission_modules.us_address_generator",
-        "--hidden-import=utils.crypto",
-        "--hidden-import=utils.app_paths",
-        "--hidden-import=utils.version_checker",
-        "--hidden-import=utils.license_monitor",
-        "--hidden-import=PyQt6.QtWebSockets",
-        "--osx-bundle-identifier=com.cursorvip.manager",
-    ]
+    base_paths = obfuscated_src if entry.parent == obfuscated_src else src_dir
+    cmd = ["pyinstaller","--noconfirm","--onedir","--windowed",f"--name={name}",f"--paths={base_paths}","--osx-bundle-identifier=com.cursorvip.manager"]
+    if minimal_mode:
+        pass
+    else:
+        cmd.extend([
+            "--hidden-import=PyQt6",
+            "--hidden-import=requests",
+            "--hidden-import=ui.about_widget",
+            "--hidden-import=ui.settings_widget",
+            "--hidden-import=ui.account_pool_widget",
+            "--hidden-import=ui.email_config_widget",
+            "--hidden-import=ui.registration_widget",
+            "--hidden-import=ui.account_detail_dialog",
+            "--hidden-import=ui.add_account_dialog",
+            "--hidden-import=core.registration_engine",
+            "--hidden-import=core.account_manager",
+            "--hidden-import=core.auth_injector",
+            "--hidden-import=core.backend_api",
+            "--hidden-import=core.cursor_api",
+            "--hidden-import=core.email_handler",
+            "--hidden-import=core.legacy_email_handler",
+            "--hidden-import=core.drission_modules",
+            "--hidden-import=core.drission_modules.account_storage",
+            "--hidden-import=core.drission_modules.auto_register",
+            "--hidden-import=core.drission_modules.browser_manager",
+            "--hidden-import=core.drission_modules.card_pool_manager",
+            "--hidden-import=core.drission_modules.country_codes",
+            "--hidden-import=core.drission_modules.cursor_switcher",
+            "--hidden-import=core.drission_modules.deep_token_getter",
+            "--hidden-import=core.drission_modules.email_verification",
+            "--hidden-import=core.drission_modules.machine_id_generator",
+            "--hidden-import=core.drission_modules.payment_handler",
+            "--hidden-import=core.drission_modules.phone_handler",
+            "--hidden-import=core.drission_modules.registration_steps",
+            "--hidden-import=core.drission_modules.token_handler",
+            "--hidden-import=core.drission_modules.turnstile_handler",
+            "--hidden-import=core.drission_modules.us_address_generator",
+            "--hidden-import=utils.crypto",
+            "--hidden-import=utils.app_paths",
+            "--hidden-import=utils.version_checker",
+            "--hidden-import=utils.license_monitor",
+            "--hidden-import=PyQt6.QtWebSockets",
+        ])
     if icon_icns.exists():
         cmd.append(f"--icon={icon_icns}")
     cmd.append(str(entry))
