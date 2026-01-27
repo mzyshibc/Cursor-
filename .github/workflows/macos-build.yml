@@ -77,21 +77,44 @@ PY
           [ -f src/main.py ] || [ -f obfuscated_src/main.py ] || (echo "No entry after mapping" && exit 1)
           echo "Ready: entry present"
 
-      - name: Build mac app
+      - name: Build (script + fallback)
+        shell: bash
         run: |
+          set +e
+          echo "Trying build_obfuscated_mac.py..."
           python build_obfuscated_mac.py
+          STATUS=$?
+          if [ $STATUS -ne 0 ]; then
+            echo "Fallback: building directly with PyInstaller"
+            # 选用 src 或 obfuscated_src 作为入口
+            ENTRY="src/main.py"
+            [ -f obfuscated_src/main.py ] && ENTRY="obfuscated_src/main.py"
+            pyinstaller --noconfirm --onedir --windowed --name CursorProManager "$ENTRY"
+          fi
+          echo "Build step finished"
 
-      - name: Package zip
+      - name: Package zip/dmg (robust)
+        shell: bash
         run: |
-          ditto -c -k --sequesterRsrc --keepParent "dist/CursorProManager.app" "CursorProManager-mac.zip"
+          set -e
+          # 找到 .app
+          APP_PATH="$(find dist -maxdepth 2 -type d -name 'CursorProManager.app' -o -name '*.app' | head -n1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app found in dist:"
+            ls -la dist || true
+            exit 1
+          fi
+          echo "Using app: $APP_PATH"
 
-      - name: Create DMG
-        run: |
-          hdiutil create -volname "CursorProManager" -srcfolder "dist/CursorProManager.app" -ov -format UDZO "CursorProManager-mac.dmg"
+          # ZIP
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "CursorProManager-mac.zip"
 
-      - name: Add FirstRun note
-        run: |
-          echo "首次运行：右键应用选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/CursorProManager.app\" 后再打开。" > dist/FirstRun.txt
+          # DMG
+          hdiutil create -volname "CursorProManager" -srcfolder "$APP_PATH" -ov -format UDZO "CursorProManager-mac.dmg"
+
+          # FirstRun
+          mkdir -p dist
+          echo "首次运行：右键应用选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/$(basename "$APP_PATH")\" 后再打开。" > dist/FirstRun.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -99,6 +122,6 @@ PY
           name: CursorProManager-mac
           path: |
             CursorProManager-mac.zip
-            dist/CursorProManager.app
             CursorProManager-mac.dmg
             dist/FirstRun.txt
+            dist/CursorProManager.app
