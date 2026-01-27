@@ -108,8 +108,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CursorProManager-mac
-          path: |
-            CursorProManager-mac.zip
-            CursorProManager-mac.dmg
-            dist/FirstRun.txt
-            dist/**/*.app
+        path: |
+          CursorProManager-mac.zip
+          CursorProManager-mac.dmg
+          dist/FirstRun.txt
+          dist/**/*.app
