@@ -60,15 +60,15 @@ jobs:
               echo "Creating minimal src/main.py"
               rm -rf src
               mkdir -p src
-              cat > src/main.py <<'PY'
-              import sys
-              from PyQt6.QtWidgets import QApplication, QLabel
-              if __name__ == "__main__":
-                  app = QApplication(sys.argv)
-                  label = QLabel("CursorProManager (placeholder build)")
-                  label.show()
-                  sys.exit(app.exec())
-              PY
+              printf '%s\n' \
+                'import sys' \
+                'from PyQt6.QtWidgets import QApplication, QLabel' \
+                'if __name__ == "__main__":' \
+                '    app = QApplication(sys.argv)' \
+                '    label = QLabel("CursorProManager (placeholder build)")' \
+                '    label.show()' \
+                '    sys.exit(app.exec())' \
+                > src/main.py
               ENTRY="src/main.py"
             fi
             EXTRA_ARGS=""
@@ -80,53 +80,6 @@ jobs:
             pyinstaller --noconfirm --onedir --windowed --name CursorProManager $EXTRA_ARGS "$ENTRY"
           fi
           echo "Build step finished"
-      - name: Codesign app (optional)
-        shell: bash
-        env:
-          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
-        run: |
-          set -e
-          APP_PATH="$(find dist -type d \( -name 'CursorProManager.app' -o -name '*.app' \) | head -n1)"
-          if [ -z "$APP_PATH" ]; then
-            exit 0
-          fi
-          if [ -z "${MACOS_CODESIGN_IDENTITY:-}" ]; then
-            exit 0
-          fi
-          if [ -f entitlements.plist ]; then
-            codesign -s "$MACOS_CODESIGN_IDENTITY" --deep --force --options runtime --entitlements entitlements.plist "$APP_PATH"
-          else
-            codesign -s "$MACOS_CODESIGN_IDENTITY" --deep --force --options runtime "$APP_PATH"
-          fi
-      - name: Notarize app (optional)
-        shell: bash
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          set -e
-          if [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_PASSWORD:-}" ] || [ -z "${APPLE_TEAM_ID:-}" ]; then
-            exit 0
-          fi
-          ZIP_PATH="CursorProManager-mac.zip"
-          if [ ! -f "$ZIP_PATH" ]; then
-            APP_PATH="$(find dist -type d \( -name 'CursorProManager.app' -o -name '*.app' \) | head -n1)"
-            if [ -z "$APP_PATH" ]; then
-              exit 0
-            fi
-            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$ZIP_PATH"
-          fi
-          xcrun notarytool submit "$ZIP_PATH" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-      - name: Staple app (optional)
-        shell: bash
-        run: |
-          set -e
-          APP_PATH="$(find dist -type d \( -name 'CursorProManager.app' -o -name '*.app' \) | head -n1)"
-          if [ -z "$APP_PATH" ]; then
-            exit 0
-          fi
-          xcrun stapler staple "$APP_PATH"
       - name: Package zip/dmg (robust)
         shell: bash
         run: |
