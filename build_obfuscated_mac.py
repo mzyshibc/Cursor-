@@ -53,61 +53,6 @@ def prune_qt_plugins(app_path: Path):
                 except: pass
     print("✅ 已精简 Qt 插件")
 
-def ensure_database_exists(project_root: Path):
-    """确保数据库文件存在，支持多个位置"""
-    db_locations = [
-        project_root / 'data' / 'accounts.db',  # 主位置
-        project_root / 'src' / 'data' / 'accounts.db',  # 备用位置
-    ]
-    
-    # 检查是否有现有的数据库文件
-    existing_db = None
-    for db_path in db_locations:
-        if db_path.exists():
-            print(f"✅ 找到数据库文件: {db_path}")
-            existing_db = db_path
-            break
-    
-    # 如果没有数据库文件，创建空的
-    if existing_db is None:
-        print("⚠️ 未找到数据库文件，将在两个位置都创建...")
-        
-        for db_path in db_locations:
-            db_path.parent.mkdir(parents=True, exist_ok=True)
-            import sqlite3
-            conn = sqlite3.connect(db_path)
-            
-            # 创建基础表结构
-            conn.executescript("""
-            CREATE TABLE IF NOT EXISTS accounts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT UNIQUE NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                status TEXT DEFAULT 'active'
-            );
-            
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-            
-            INSERT OR IGNORE INTO settings (key, value) VALUES 
-                ('version', '1.0.0'),
-                ('database_version', '1');
-            """)
-            conn.commit()
-            conn.close()
-            print(f"✅ 已创建数据库: {db_path}")
-    else:
-        # 确保另一个位置也有数据库文件（复制）
-        for db_path in db_locations:
-            if db_path != existing_db and not db_path.exists():
-                db_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(existing_db, db_path)
-                print(f"✅ 复制数据库到: {db_path}")
-    
-    return existing_db or db_locations[0]
-
 def get_add_data_paths(project_root: Path):
     """获取需要打包的数据文件路径"""
     add_data_args = []
@@ -116,15 +61,18 @@ def get_add_data_paths(project_root: Path):
     primary_db = project_root / 'data' / 'accounts.db'
     secondary_db = project_root / 'src' / 'data' / 'accounts.db'
     
+    # 注意：在 macOS 上，PyInstaller 使用分号 (;) 作为分隔符
+    # 但系统路径分隔符是冒号 (:)，所以这里容易混淆
+    
     # 优先使用主位置的数据库
     if primary_db.exists():
+        # macOS 上正确的语法是分号分隔
         add_data_args.append(f'--add-data={primary_db}:data')
         print(f"✅ 包含数据库文件 (主位置): {primary_db}")
     elif secondary_db.exists():
         add_data_args.append(f'--add-data={secondary_db}:data')
         print(f"✅ 包含数据库文件 (备用位置): {secondary_db}")
     else:
-        # 理论上不会走到这里，因为 ensure_database_exists 已确保
         print("⚠️ 未找到数据库文件，但会继续构建")
     
     # 其他资源文件
@@ -137,8 +85,10 @@ def get_add_data_paths(project_root: Path):
         src_path = project_root / src
         if src_path.exists():
             if src_path.is_dir():
+                # 目录：使用分号分隔
                 add_data_args.append(f'--add-data={src_path}:{dest}')
             else:
+                # 文件：使用分号分隔
                 add_data_args.append(f'--add-data={src_path}:{dest}')
             print(f"✅ 包含资源: {src} -> {dest}")
     
@@ -154,8 +104,17 @@ def main():
     obfuscated_src = project_root / "obfuscated_src"
     src_dir = project_root / "src"
     
-    # 确保数据库文件存在（在两个位置）
-    ensure_database_exists(project_root)
+    # 检查数据库文件
+    primary_db = project_root / 'data' / 'accounts.db'
+    secondary_db = project_root / 'src' / 'data' / 'accounts.db'
+    
+    if not primary_db.exists() and not secondary_db.exists():
+        print("⚠️ 未找到数据库文件，创建空的数据库...")
+        primary_db.parent.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+        conn = sqlite3.connect(primary_db)
+        conn.close()
+        print(f"✅ 已创建空数据库: {primary_db}")
     
     entry = obfuscated_src / "main.py" if (obfuscated_src / "main.py").exists() else src_dir / "main.py"
     entry_dir = entry.parent
@@ -175,9 +134,22 @@ def main():
         "--osx-bundle-identifier=com.cursorvip.manager"
     ]
     
-    # 添加数据文件
-    add_data_args = get_add_data_paths(project_root)
-    cmd.extend(add_data_args)
+    # 添加数据文件 - 使用分号分隔
+    if primary_db.exists():
+        cmd.append(f"--add-data={primary_db}:data")
+        print(f"✅ 包含数据库文件: {primary_db}")
+    elif secondary_db.exists():
+        cmd.append(f"--add-data={secondary_db}:data")
+        print(f"✅ 包含数据库文件: {secondary_db}")
+    
+    # 添加其他资源文件
+    if (project_root / "src" / "assets").exists():
+        cmd.append(f"--add-data={project_root / 'src' / 'assets'}:src/assets")
+        print("✅ 包含资源: src/assets")
+    
+    if (project_root / "src" / "utils" / "public_key.pem").exists():
+        cmd.append(f"--add-data={project_root / 'src' / 'utils' / 'public_key.pem'}:src/utils")
+        print("✅ 包含资源: src/utils/public_key.pem")
     
     if minimal_mode:
         pass
@@ -240,22 +212,68 @@ def main():
         print("❌ 未找到 .app 产物")
         sys.exit(1)
     
-    # 验证数据库是否被打包
+    # 验证数据库是否被打包 - 更详细的检查
     print("\n🔍 验证打包的文件...")
-    if (app_path / "Contents" / "MacOS" / "data" / "accounts.db").exists():
-        print("✅ 数据库已成功打包到应用中")
-    else:
-        print("⚠️ 数据库文件未找到，检查应用内资源")
-        macos_dir = app_path / "Contents" / "MacOS"
-        if macos_dir.exists():
-            print("应用内文件结构:")
-            for root, dirs, files in os.walk(macos_dir):
-                level = root.replace(str(macos_dir), '').count(os.sep)
+    
+    # 检查多个可能的位置
+    possible_locations = [
+        app_path / "Contents" / "MacOS" / "data" / "accounts.db",
+        app_path / "Contents" / "Resources" / "data" / "accounts.db",
+        app_path / "Contents" / "MacOS" / "accounts.db",  # 可能在根目录
+    ]
+    
+    found = False
+    for location in possible_locations:
+        if location.exists():
+            print(f"✅ 数据库已成功打包到应用中: {location}")
+            found = True
+            break
+    
+    if not found:
+        print("⚠️ 数据库文件未找到，搜索整个应用...")
+        # 搜索整个应用包
+        for root, dirs, files in os.walk(app_path):
+            for file in files:
+                if file == "accounts.db":
+                    db_path = Path(root) / file
+                    print(f"✅ 在非标准位置找到数据库: {db_path}")
+                    found = True
+                    break
+            if found:
+                break
+        
+        if not found:
+            print("❌ 数据库中未找到，检查应用内结构:")
+            # 列出应用包的结构
+            for root, dirs, files in os.walk(app_path / "Contents"):
+                level = root.replace(str(app_path / "Contents"), '').count(os.sep)
                 indent = ' ' * 2 * level
                 print(f'{indent}{os.path.basename(root)}/')
                 subindent = ' ' * 2 * (level + 1)
-                for file in files:
+                for file in files[:10]:  # 只显示前10个文件
                     print(f'{subindent}{file}')
+                if len(files) > 10:
+                    print(f'{subindent}... 还有 {len(files)-10} 个文件')
+    
+    # 检查 _MEIPASS 中的文件
+    print("\n🔍 检查 _MEIPASS 目录内容:")
+    # 查找 _MEIPASS 目录（通常是 Contents/MacOS 下的某个目录）
+    macos_dir = app_path / "Contents" / "MacOS"
+    if macos_dir.exists():
+        for item in macos_dir.iterdir():
+            if item.is_dir() and item.name.startswith("_MEI"):
+                print(f"✅ 找到 _MEIPASS 目录: {item.name}")
+                # 列出其中的文件和目录
+                for subitem in item.iterdir():
+                    if subitem.is_dir():
+                        print(f"  📁 {subitem.name}/")
+                        if subitem.name == "data":
+                            print(f"    ✅ 找到 data 目录")
+                            db_files = list(subitem.glob("*.db"))
+                            for db in db_files:
+                                print(f"    📄 {db.name}")
+                    else:
+                        print(f"  📄 {subitem.name}")
     
     prune_qt_plugins(app_path)
     
