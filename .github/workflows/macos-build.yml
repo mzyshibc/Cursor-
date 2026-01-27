@@ -11,20 +11,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-py311-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-py311-
       - name: Install dependencies (robust)
         shell: bash
         run: |
           set -e
           echo "Python: $(python --version)"
           python -m pip install --upgrade pip setuptools wheel
-          PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
-          for i in 1 2 3; do
-            echo "Attempt $i: installing deps..."
-            python -m pip install --progress-bar off --default-timeout=120 $PKGS && break || {
-              echo "pip install failed, retrying..."
-              sleep 10
-            }
-          done
+          if [ -f requirements.txt ]; then
+            for i in 1 2 3; do
+              echo "Attempt $i: installing requirements.txt..."
+              python -m pip install --progress-bar off --default-timeout=120 -r requirements.txt && break || {
+                echo "pip install failed, retrying..."
+                sleep 10
+              }
+            done
+          else
+            PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
+            for i in 1 2 3; do
+              echo "Attempt $i: installing deps..."
+              python -m pip install --progress-bar off --default-timeout=120 $PKGS && break || {
+                echo "pip install failed, retrying..."
+                sleep 10
+              }
+            done
+          fi
       - name: Build (script + fallback)
         shell: bash
         run: |
@@ -51,9 +67,33 @@ jobs:
               PY
               ENTRY="src/main.py"
             fi
-            pyinstaller --noconfirm --onedir --windowed --name CursorProManager "$ENTRY"
+            EXTRA_ARGS=""
+            if pyinstaller --help | grep -q -- '--target-arch'; then
+              if [ -n "${MACOS_TARGET_ARCH:-}" ]; then
+                EXTRA_ARGS="--target-arch ${MACOS_TARGET_ARCH}"
+              fi
+            fi
+            pyinstaller --noconfirm --onedir --windowed --name CursorProManager $EXTRA_ARGS "$ENTRY"
           fi
           echo "Build step finished"
+      - name: Codesign app (optional)
+        shell: bash
+        env:
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          set -e
+          APP_PATH="$(find dist -type d \( -name 'CursorProManager.app' -o -name '*.app' \) | head -n1)"
+          if [ -z "$APP_PATH" ]; then
+            exit 0
+          fi
+          if [ -z "${MACOS_CODESIGN_IDENTITY:-}" ]; then
+            exit 0
+          fi
+          if [ -f entitlements.plist ]; then
+            codesign -s "$MACOS_CODESIGN_IDENTITY" --deep --force --options runtime --entitlements entitlements.plist "$APP_PATH"
+          else
+            codesign -s "$MACOS_CODESIGN_IDENTITY" --deep --force --options runtime "$APP_PATH"
+          fi
       - name: Package zip/dmg (robust)
         shell: bash
         run: |
