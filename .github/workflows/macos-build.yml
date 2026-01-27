@@ -11,33 +11,53 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller PyQt6 requests psutil jwt cryptography lxml DrissionPage pyinstaller-hooks-contrib
+
       - name: Unpack sources
         shell: bash
         run: |
           if [ -f src.zip ]; then
             echo "Unpacking via ditto..."
             ditto -x -k src.zip .
-            [ -f src/main.py ] && echo "Found src/main.py" || (echo "src/main.py missing" && exit 1)
-            echo "Unpacked src.zip"
-          else
-            echo "src.zip not found; using repo src/ if present"
           fi
+
+          if [ ! -f src/main.py ]; then
+            FOUND_DIR="$(dirname "$(find . -maxdepth 4 -type f -name main.py | head -n1)")"
+            if [ -n "$FOUND_DIR" ]; then
+              echo "Mapping $FOUND_DIR -> ./src"
+              rm -rf src
+              mkdir -p src
+              cp -R "$FOUND_DIR"/ src/
+            else
+              echo "src/main.py missing after unpack"
+              ls -la
+              find . -maxdepth 4 -type f -name main.py
+              exit 1
+            fi
+          fi
+
+          echo "Ready: src/main.py exists"
+
       - name: Build mac app
         run: |
           python build_obfuscated_mac.py
+
       - name: Package zip
         run: |
           ditto -c -k --sequesterRsrc --keepParent "dist/CursorProManager.app" "CursorProManager-mac.zip"
+
       - name: Create DMG
         run: |
           hdiutil create -volname "CursorProManager" -srcfolder "dist/CursorProManager.app" -ov -format UDZO "CursorProManager-mac.dmg"
+
       - name: Add FirstRun note
         run: |
           echo "首次运行：右键应用选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/CursorProManager.app\" 后再打开。" > dist/FirstRun.txt
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
