@@ -3,6 +3,7 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+
 jobs:
   build-macos:
     runs-on: macos-latest
@@ -10,9 +11,11 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - uses: actions/cache@v4
         with:
           path: |
@@ -21,6 +24,7 @@ jobs:
           key: pip-${{ runner.os }}-py311-${{ hashFiles('**/requirements*.txt') }}
           restore-keys: |
             pip-${{ runner.os }}-py311-
+
       - name: Install dependencies (robust)
         shell: bash
         run: |
@@ -45,6 +49,33 @@ jobs:
               }
             done
           fi
+
+      - name: Unpack sources
+        shell: bash
+        run: |
+          set -e
+          if [ -f src.zip ]; then
+            echo "Unpacking via ditto..."
+            ditto -x -k src.zip .
+          else
+            echo "src.zip not found; using repo src/ if present"
+          fi
+          if [ ! -f src/main.py ]; then
+            FOUND_FILE="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
+            if [ -n "$FOUND_FILE" ]; then
+              FOUND_DIR="$(dirname "$FOUND_FILE")"
+              echo "Mapping $FOUND_DIR -> ./src"
+              rm -rf src
+              mkdir -p src
+              cp -R "$FOUND_DIR"/. src/
+            else
+              echo "src/main.py missing after unpack"
+              find . -maxdepth 25 -type f -name main.py
+              exit 1
+            fi
+          fi
+          echo "Ready: src/main.py exists"
+
       - name: Build (script + fallback)
         shell: bash
         run: |
@@ -80,11 +111,12 @@ jobs:
             pyinstaller --noconfirm --onedir --windowed --name CursorProManager $EXTRA_ARGS "$ENTRY"
           fi
           echo "Build step finished"
+
       - name: Package zip/dmg (robust)
         shell: bash
         run: |
           set -e
-          APP_PATH="$(find dist -type d \( -name 'CursorProManager.app' -o -name '*.app' \) | head -n1)"
+          APP_PATH="$(find dist -type d $ -name 'CursorProManager.app' -o -name '*.app' $ | head -n1)"
           if [ -z "$APP_PATH" ]; then
             echo "No .app found in dist"
             ls -la dist || true
@@ -97,6 +129,7 @@ jobs:
 
           mkdir -p dist
           echo "首次运行：右键应用选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/$(basename "$APP_PATH")\" 后再打开。" > dist/FirstRun.txt
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
