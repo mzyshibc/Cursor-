@@ -15,6 +15,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller PyQt6 requests psutil jwt cryptography lxml DrissionPage _pyinstaller_hooks_contrib
+      - name: Unpack sources
+        run: |
+          if [ -f src.zip ]; then
+            unzip -q -o src.zip
+            echo "Unpacked src.zip"
+          else
+            echo "src.zip not found; using repo src/ if present"
+          fi
       - name: Build mac app
         run: |
           python build_obfuscated_mac.py
