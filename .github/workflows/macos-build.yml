@@ -34,7 +34,6 @@ jobs:
               echo "Mapping $FOUND_DIR -> ./src"
               rm -rf src
               mkdir -p src
-              # 复制目录内容到 ./src（避免 src/src 这种嵌套）
               cp -R "$FOUND_DIR"/. src/
             else
               echo "main.py not found anywhere after unpack."
@@ -45,7 +44,6 @@ jobs:
               exit 1
             fi
           fi
-
           echo "Ready: src/main.py exists"
 
       - name: Build mac app
