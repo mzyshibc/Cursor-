@@ -1,0 +1,38 @@
+name: macos-build
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller PyQt6 requests psutil jwt cryptography lxml DrissionPage _pyinstaller_hooks_contrib
+      - name: Build mac app
+        run: |
+          python build_obfuscated_mac.py
+      - name: Package zip
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "dist/CursorProManager.app" "CursorProManager-mac.zip"
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "CursorProManager" -srcfolder "dist/CursorProManager.app" -ov -format UDZO "CursorProManager-mac.dmg"
+      - name: Add FirstRun note
+        run: |
+          echo "首次运行：右键应用选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/CursorProManager.app\" 后再打开。" > dist/FirstRun.txt
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CursorProManager-mac
+          path: |
+            CursorProManager-mac.zip
+            dist/CursorProManager.app
+            CursorProManager-mac.dmg
+            dist/FirstRun.txt
