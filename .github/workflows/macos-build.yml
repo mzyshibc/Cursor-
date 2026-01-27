@@ -19,7 +19,6 @@ jobs:
         run: |
           set -e
           python -m pip install --upgrade pip setuptools wheel
-
           PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
           for i in 1 2 3; do
             echo "Attempt $i: installing deps..."
@@ -29,7 +28,7 @@ jobs:
             }
           done
 
-      - name: Unpack sources
+      - name: Unpack sources and locate entry
         shell: bash
         run: |
           set -e
@@ -37,25 +36,37 @@ jobs:
             echo "Unpacking via ditto..."
             ditto -x -k src.zip .
           else
-            echo "src.zip not found; using repo src/ if present"
+            echo "src.zip not found; using repo src/ or obfuscated_src/ if present"
           fi
 
-          if [ ! -f src/main.py ]; then
-            FOUND_FILE="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
-            if [ -n "$FOUND_FILE" ]; then
-              FOUND_DIR="$(dirname "$FOUND_FILE")"
-              echo "Mapping $FOUND_DIR -> ./src"
-              rm -rf src
-              mkdir -p src
-              cp -R "$FOUND_DIR"/. src/
+          # If either standard dirs already contain main.py, accept
+          if [ -f src/main.py ] || [ -f obfuscated_src/main.py ]; then
+            echo "Entry found in existing src/ or obfuscated_src/"
+          else
+            # Find any main.py in unpacked content
+            FOUND_MAIN="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
+            if [ -n "$FOUND_MAIN" ]; then
+              FOUND_DIR="$(dirname "$FOUND_MAIN")"
+              if [[ "$FOUND_DIR" == *"obfuscated_src"* ]]; then
+                DEST="obfuscated_src"
+              else
+                DEST="src"
+              fi
+              echo "Mapping $FOUND_DIR -> ./$DEST"
+              rm -rf "$DEST"
+              mkdir -p "$DEST"
+              cp -R "$FOUND_DIR"/. "$DEST"/
             else
               echo "main.py not found anywhere after unpack."
-              echo "Directory listing (top-level):"; ls -la
+              echo "Top-level listing:"; ls -la
               echo "Find results:"; find . -maxdepth 25 -type f -name main.py
               exit 1
             fi
           fi
-          echo "Ready: src/main.py exists"
+
+          # Final check
+          [ -f src/main.py ] || [ -f obfuscated_src/main.py ] || (echo "No entry after mapping" && exit 1)
+          echo "Ready: entry present"
 
       - name: Build mac app
         run: |
