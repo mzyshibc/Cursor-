@@ -94,7 +94,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          APP_PATH="$(find dist -type d $ -name 'CursorProManager.app' -o -name '*.app' $ | head -n1)"
+          APP_PATH="$(find dist -type d -name 'CursorProManager.app' -o -name '*.app' | head -n1)"
           if [ -z "$APP_PATH" ]; then
             echo "No .app found in dist"; ls -la dist || true; exit 1
           fi
@@ -108,8 +108,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CursorProManager-mac
-        path: |
-          CursorProManager-mac.zip
-          CursorProManager-mac.dmg
-          dist/FirstRun.txt
-          dist/**/*.app
+          path: |
+            CursorProManager-mac.zip
+            CursorProManager-mac.dmg
+            dist/FirstRun.txt
+            dist/**/*.app
