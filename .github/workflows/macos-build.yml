@@ -29,24 +29,15 @@ jobs:
         shell: bash
         run: |
           set -e
-          echo "Python: $(python --version)"
           python -m pip install --upgrade pip setuptools wheel
           if [ -f requirements.txt ]; then
             for i in 1 2 3; do
-              echo "Attempt $i: installing requirements.txt..."
-              python -m pip install --progress-bar off --default-timeout=120 -r requirements.txt && break || {
-                echo "pip install failed, retrying..."
-                sleep 10
-              }
+              python -m pip install --progress-bar off --default-timeout=120 -r requirements.txt && break || { echo "retry..."; sleep 10; }
             done
           else
             PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
             for i in 1 2 3; do
-              echo "Attempt $i: installing deps..."
-              python -m pip install --progress-bar off --default-timeout=120 $PKGS && break || {
-                echo "pip install failed, retrying..."
-                sleep 10
-              }
+              python -m pip install --progress-bar off --default-timeout=120 $PKGS && break || { echo "retry..."; sleep 10; }
             done
           fi
 
@@ -60,14 +51,12 @@ jobs:
           else
             echo "src.zip not found; using repo tree if present"
           fi
-          echo "Find main.py:"
-          find . -maxdepth 3 -type f -name main.py || true
+          echo "Find main.py:"; find . -maxdepth 3 -type f -name main.py || true
 
       - name: Build (script + fallback with dynamic entry)
         shell: bash
         run: |
           set +e
-          # 动态选择入口：优先 src/main.py，其次仓库根 main.py，再次全局搜索
           ENTRY=""
           if [ -f src/main.py ]; then
             ENTRY="src/main.py"
@@ -75,14 +64,11 @@ jobs:
             ENTRY="main.py"
           else
             FOUND="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
-            if [ -n "$FOUND" ]; then
-              ENTRY="$FOUND"
-            fi
+            [ -n "$FOUND" ] && ENTRY="$FOUND"
           fi
-
           echo "Selected ENTRY: ${ENTRY:-<none>}"
-          # 先试项目脚本（若存在）
-          if [ -f "build_obfuscated_mac.py" ]; then
+
+          if [ -f build_obfuscated_mac.py ]; then
             echo "Trying build_obfuscated_mac.py..."
             python build_obfuscated_mac.py
             STATUS=$?
@@ -122,15 +108,11 @@ jobs:
           set -e
           APP_PATH="$(find dist -type d $ -name 'CursorProManager.app' -o -name '*.app' $ | head -n1)"
           if [ -z "$APP_PATH" ]; then
-            echo "No .app found in dist"
-            ls -la dist || true
-            exit 1
+            echo "No .app found in dist"; ls -la dist || true; exit 1
           fi
           echo "Using app: $APP_PATH"
-
           ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "CursorProManager-mac.zip"
           hdiutil create -volname "CursorProManager" -srcfolder "$APP_PATH" -ov -format UDZO "CursorProManager-mac.dmg"
-
           mkdir -p dist
           echo "首次运行：右键应用选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/$(basename "$APP_PATH")\" 后再打开。" > dist/FirstRun.txt
 
