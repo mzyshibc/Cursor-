@@ -58,39 +58,43 @@ jobs:
             echo "Unpacking via ditto..."
             ditto -x -k src.zip .
           else
-            echo "src.zip not found; using repo src/ if present"
+            echo "src.zip not found; using repo tree if present"
           fi
-          if [ ! -f src/main.py ]; then
-            FOUND_FILE="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
-            if [ -n "$FOUND_FILE" ]; then
-              FOUND_DIR="$(dirname "$FOUND_FILE")"
-              echo "Mapping $FOUND_DIR -> ./src"
-              rm -rf src
-              mkdir -p src
-              cp -R "$FOUND_DIR"/. src/
-            else
-              echo "src/main.py missing after unpack"
-              find . -maxdepth 25 -type f -name main.py
-              exit 1
-            fi
-          fi
-          echo "Ready: src/main.py exists"
+          echo "Find main.py:"
+          find . -maxdepth 3 -type f -name main.py || true
 
-      - name: Build (script + fallback)
+      - name: Build (script + fallback with dynamic entry)
         shell: bash
         run: |
           set +e
-          echo "Trying build_obfuscated_mac.py..."
-          python build_obfuscated_mac.py
-          STATUS=$?
+          # 动态选择入口：优先 src/main.py，其次仓库根 main.py，再次全局搜索
+          ENTRY=""
+          if [ -f src/main.py ]; then
+            ENTRY="src/main.py"
+          elif [ -f main.py ]; then
+            ENTRY="main.py"
+          else
+            FOUND="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
+            if [ -n "$FOUND" ]; then
+              ENTRY="$FOUND"
+            fi
+          fi
+
+          echo "Selected ENTRY: ${ENTRY:-<none>}"
+          # 先试项目脚本（若存在）
+          if [ -f "build_obfuscated_mac.py" ]; then
+            echo "Trying build_obfuscated_mac.py..."
+            python build_obfuscated_mac.py
+            STATUS=$?
+          else
+            STATUS=1
+          fi
+
           if [ $STATUS -ne 0 ]; then
             echo "Fallback: building directly with PyInstaller"
-            ENTRY="src/main.py"
-            [ -f obfuscated_src/main.py ] && ENTRY="obfuscated_src/main.py"
-            if [ ! -f "$ENTRY" ]; then
-              echo "Creating minimal src/main.py"
-              rm -rf src
-              mkdir -p src
+            if [ -z "$ENTRY" ]; then
+              echo "No main.py found; creating minimal src/main.py"
+              rm -rf src && mkdir -p src
               printf '%s\n' \
                 'import sys' \
                 'from PyQt6.QtWidgets import QApplication, QLabel' \
