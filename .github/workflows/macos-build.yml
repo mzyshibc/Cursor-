@@ -35,6 +35,17 @@ jobs:
             python -m pip install --progress-bar off --default-timeout=120 $PKGS && break || { echo "retry..."; sleep 10; }
           done
 
+      - name: Setup Rosetta and x86_64 Python (Miniconda)
+        shell: bash
+        run: |
+          set -e
+          softwareupdate --install-rosetta --agree-to-license || true
+          curl -L https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o miniconda_x64.sh
+          arch -x86_64 bash miniconda_x64.sh -b -p "$HOME/miniconda-x86_64"
+          "$HOME/miniconda-x86_64/bin/conda" create -y -n py311 python=3.11
+          PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
+          arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -m pip install --progress-bar off --default-timeout=120 $PKGS
+
       - name: Unpack sources
         shell: bash
         run: |
@@ -86,30 +97,161 @@ jobs:
                 > src/main.py
               ENTRY="src/main.py"
             fi
-            pyinstaller --noconfirm --onedir --windowed --name CursorProManager "$ENTRY"
+            pyinstaller --noconfirm --onedir --windowed --name CursorProManager \
+              --hidden-import=logging.handlers --hidden-import=logging.config \
+              --hidden-import=cryptography --hidden-import=cryptography.hazmat \
+              --hidden-import=cryptography.hazmat.backends \
+              --hidden-import=cryptography.hazmat.primitives \
+              --hidden-import=cryptography.hazmat.primitives.padding \
+              --hidden-import=cryptography.hazmat.primitives.serialization \
+              --hidden-import=cryptography.hazmat.primitives.hashes \
+              --hidden-import=cryptography.hazmat.primitives.ciphers \
+              --hidden-import=cryptography.hazmat.primitives.ciphers.modes \
+              --hidden-import=cryptography.hazmat.primitives.ciphers.algorithms \
+              --hidden-import=cryptography.hazmat.primitives.asymmetric \
+              --hidden-import=cryptography.hazmat.primitives.asymmetric.padding \
+              --hidden-import=jwt --hidden-import=psutil --hidden-import=imaplib \
+              --hidden-import=email --hidden-import=email.header --hidden-import=email.utils \
+              --hidden-import=uuid --hidden-import=DrissionPage \
+              --hidden-import=ui.about_widget --hidden-import=ui.settings_widget \
+              --hidden-import=ui.account_pool_widget --hidden-import=ui.email_config_widget \
+              --hidden-import=ui.registration_widget --hidden-import=ui.account_detail_dialog \
+              --hidden-import=ui.add_account_dialog --hidden-import=core.registration_engine \
+              --hidden-import=core.account_manager --hidden-import=core.auth_injector \
+              --hidden-import=core.backend_api --hidden-import=core.cursor_api \
+              --hidden-import=core.email_handler --hidden-import=core.legacy_email_handler \
+              --hidden-import=core.drission_modules --hidden-import=core.drission_modules.account_storage \
+              --hidden-import=core.drission_modules.auto_register --hidden-import=core.drission_modules.browser_manager \
+              --hidden-import=core.drission_modules.card_pool_manager --hidden-import=core.drission_modules.country_codes \
+              --hidden-import=core.drission_modules.cursor_switcher --hidden-import=core.drission_modules.deep_token_getter \
+              --hidden-import=core.drission_modules.email_verification --hidden-import=core.drission_modules.machine_id_generator \
+              --hidden-import=core.drission_modules.payment_handler --hidden-import=core.drission_modules.phone_handler \
+              --hidden-import=core.drission_modules.registration_steps --hidden-import=core.drission_modules.token_handler \
+              --hidden-import=core.drission_modules.turnstile_handler --hidden-import=core.drission_modules.us_address_generator \
+              --hidden-import=src.ui.about_widget --hidden-import=src.ui.settings_widget \
+              --hidden-import=src.ui.account_pool_widget --hidden-import=src.ui.email_config_widget \
+              --hidden-import=src.ui.registration_widget --hidden-import=src.ui.account_detail_dialog \
+              --hidden-import=src.ui.add_account_dialog --hidden-import=src.core.registration_engine \
+              --hidden-import=src.core.account_manager --hidden-import=src.core.auth_injector \
+              --hidden-import=src.core.backend_api --hidden-import=src.core.cursor_api \
+              --hidden-import=src.core.email_handler --hidden-import=src.core.legacy_email_handler \
+              --hidden-import=src.core.drission_modules --hidden-import=src.core.drission_modules.account_storage \
+              --hidden-import=src.core.drission_modules.auto_register --hidden-import=src.core.drission_modules.browser_manager \
+              --hidden-import=src.core.drission_modules.card_pool_manager --hidden-import=src.core.drission_modules.country_codes \
+              --hidden-import=src.core.drission_modules.cursor_switcher --hidden-import=src.core.drission_modules.deep_token_getter \
+              --hidden-import=src.core.drission_modules.email_verification --hidden-import=src.core.drission_modules.machine_id_generator \
+              --hidden-import=src.core.drission_modules.payment_handler --hidden-import=src.core.drission_modules.phone_handler \
+              --hidden-import=src.core.drission_modules.registration_steps --hidden-import=src.core.drission_modules.token_handler \
+              --hidden-import=src.core.drission_modules.turnstile_handler --hidden-import=src.core.drission_modules.us_address_generator \
+              --hidden-import=src.utils.crypto --hidden-import=src.utils.app_paths \
+              --hidden-import=src.utils.version_checker --hidden-import=src.utils.license_monitor \
+              --hidden-import=src.utils.logger "$ENTRY"
           fi
           echo "Build step finished"
+
+      - name: Build x86_64 with Rosetta (if available)
+        shell: bash
+        run: |
+          set -e
+          ENTRY=""
+          if [ -f src/main.py ]; then
+            ENTRY="src/main.py"
+          elif [ -f main.py ]; then
+            ENTRY="main.py"
+          else
+            FOUND="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
+            [ -n "$FOUND" ] && ENTRY="$FOUND"
+          fi
+          echo "Selected ENTRY: ${ENTRY:-<none>}"
+          if [ -z "$ENTRY" ]; then
+            exit 0
+          fi
+          if [ -d "$HOME/miniconda-x86_64" ]; then
+            echo "Building x86_64 via conda env py311..."
+            arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 pyinstaller --noconfirm --onedir --windowed --name CursorProManager-x86_64 \
+              --hidden-import=logging.handlers --hidden-import=logging.config \
+              --hidden-import=cryptography --hidden-import=cryptography.hazmat \
+              --hidden-import=cryptography.hazmat.backends \
+              --hidden-import=cryptography.hazmat.primitives \
+              --hidden-import=cryptography.hazmat.primitives.padding \
+              --hidden-import=cryptography.hazmat.primitives.serialization \
+              --hidden-import=cryptography.hazmat.primitives.hashes \
+              --hidden-import=cryptography.hazmat.primitives.ciphers \
+              --hidden-import=cryptography.hazmat.primitives.ciphers.modes \
+              --hidden-import=cryptography.hazmat.primitives.ciphers.algorithms \
+              --hidden-import=cryptography.hazmat.primitives.asymmetric \
+              --hidden-import=cryptography.hazmat.primitives.asymmetric.padding \
+              --hidden-import=jwt --hidden-import=psutil --hidden-import=imaplib \
+              --hidden-import=email --hidden-import=email.header --hidden-import=email.utils \
+              --hidden-import=uuid --hidden-import=DrissionPage \
+              --hidden-import=ui.about_widget --hidden-import=ui.settings_widget \
+              --hidden-import=ui.account_pool_widget --hidden-import=ui.email_config_widget \
+              --hidden-import=ui.registration_widget --hidden-import=ui.account_detail_dialog \
+              --hidden-import=ui.add_account_dialog --hidden-import=core.registration_engine \
+              --hidden-import=core.account_manager --hidden-import=core.auth_injector \
+              --hidden-import=core.backend_api --hidden-import=core.cursor_api \
+              --hidden-import=core.email_handler --hidden-import=core.legacy_email_handler \
+              --hidden-import=core.drission_modules --hidden-import=core.drission_modules.account_storage \
+              --hidden-import=core.drission_modules.auto_register --hidden-import=core.drission_modules.browser_manager \
+              --hidden-import=core.drission_modules.card_pool_manager --hidden-import=core.drission_modules.country_codes \
+              --hidden-import=core.drission_modules.cursor_switcher --hidden-import=core.drission_modules.deep_token_getter \
+              --hidden-import=core.drission_modules.email_verification --hidden-import=core.drission_modules.machine_id_generator \
+              --hidden-import=core.drission_modules.payment_handler --hidden-import=core.drission_modules.phone_handler \
+              --hidden-import=core.drission_modules.registration_steps --hidden-import=core.drission_modules.token_handler \
+              --hidden-import=core.drission_modules.turnstile_handler --hidden-import=core.drission_modules.us_address_generator \
+              --hidden-import=src.ui.about_widget --hidden-import=src.ui.settings_widget \
+              --hidden-import=src.ui.account_pool_widget --hidden-import=src.ui.email_config_widget \
+              --hidden-import=src.ui.registration_widget --hidden-import=src.ui.account_detail_dialog \
+              --hidden-import=src.ui.add_account_dialog --hidden-import=src.core.registration_engine \
+              --hidden-import=src.core.account_manager --hidden-import=src.core.auth_injector \
+              --hidden-import=src.core.backend_api --hidden-import=src.core.cursor_api \
+              --hidden-import=src.core.email_handler --hidden-import=src.core.legacy_email_handler \
+              --hidden-import=src.core.drission_modules --hidden-import=src.core.drission_modules.account_storage \
+              --hidden-import=src.core.drission_modules.auto_register --hidden-import=src.core.drission_modules.browser_manager \
+              --hidden-import=src.core.drission_modules.card_pool_manager --hidden-import=src.core.drission_modules.country_codes \
+              --hidden-import=src.core.drission_modules.cursor_switcher --hidden-import=src.core.drission_modules.deep_token_getter \
+              --hidden-import=src.core.drission_modules.email_verification --hidden-import=src.core.drission_modules.machine_id_generator \
+              --hidden-import=src.core.drission_modules.payment_handler --hidden-import=src.core.drission_modules.phone_handler \
+              --hidden-import=src.core.drission_modules.registration_steps --hidden-import=src.core.drission_modules.token_handler \
+              --hidden-import=src.core.drission_modules.turnstile_handler --hidden-import=src.core.drission_modules.us_address_generator \
+              --hidden-import=src.utils.crypto --hidden-import=src.utils.app_paths \
+              --hidden-import=src.utils.version_checker --hidden-import=src.utils.license_monitor \
+              --hidden-import=src.utils.logger "$ENTRY"
+          else
+            echo "x86_64 environment not found; skipping x86_64 build."
+          fi
+          echo "x86_64 build step finished"
 
       - name: Package zip/dmg (robust)
         shell: bash
         run: |
           set -e
-          APP_PATH="$(find dist -type d -name 'CursorProManager.app' -o -name '*.app' | head -n1)"
-          if [ -z "$APP_PATH" ]; then
+          APPS=$(find dist -type d -name '*.app')
+          if [ -z "$APPS" ]; then
             echo "No .app found in dist"; ls -la dist || true; exit 1
           fi
-          echo "Using app: $APP_PATH"
-          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "CursorProManager-mac.zip"
-          hdiutil create -volname "CursorProManager" -srcfolder "$APP_PATH" -ov -format UDZO "CursorProManager-mac.dmg"
+          for APP_PATH in $APPS; do
+            echo "Using app: $APP_PATH"
+            xattr -cr "$APP_PATH" || true
+            BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
+            ARCH="$(file -b "$BIN" | awk '{print $1}')"
+            SUFFIX="mac"
+            if echo "$ARCH" | grep -qi "x86_64"; then SUFFIX="mac-x86_64"; fi
+            if echo "$ARCH" | grep -qi "arm64"; then SUFFIX="mac-arm64"; fi
+            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "CursorProManager-${SUFFIX}.zip"
+            hdiutil create -volname "CursorProManager" -srcfolder "$APP_PATH" -ov -format UDZO "CursorProManager-${SUFFIX}.dmg"
+          done
           mkdir -p dist
-          echo "首次运行：右键应用选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/$(basename "$APP_PATH")\" 后再打开。" > dist/FirstRun.txt
+          echo "首次运行：将 .app 拷贝到 /Applications 后，右键选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/CursorProManager.app\" 再打开。Apple Silicon 使用 arm64 包，Intel 使用 x86_64 包。" > dist/FirstRun.txt
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CursorProManager-mac
+          name: CursorProManager-mac-all
           path: |
-            CursorProManager-mac.zip
-            CursorProManager-mac.dmg
+            CursorProManager-mac-arm64.zip
+            CursorProManager-mac-arm64.dmg
+            CursorProManager-mac-x86_64.zip
+            CursorProManager-mac-x86_64.dmg
             dist/FirstRun.txt
             dist/**/*.app
