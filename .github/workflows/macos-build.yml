@@ -349,6 +349,12 @@ jobs:
             kill "$PID" 2>/dev/null || true
             wait "$PID"; CODE=$?
             echo "进程退出码：$CODE"
+            if [ "$CODE" -eq 143 ] || [ "$CODE" -eq 0 ]; then
+              echo "✅ 健康检查通过（应用已成功初始化，随后被测试脚本正常终止）"
+            else
+              echo "❌ 健康检查失败（退出码：$CODE）"
+              exit 1
+            fi
           done
 
       - name: Upload artifact
