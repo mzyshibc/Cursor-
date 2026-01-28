@@ -3,6 +3,11 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      license_key_input:
+        description: "临时授权码（仅用于CI冒烟测试）"
+        required: false
+        type: string
 
 jobs:
   build-macos:
@@ -123,6 +128,73 @@ jobs:
               "    sys.modules['src.utils.config'] = cfg" \
               "    sys.modules['utils.config'] = cfg" \
               > "$HOOK"
+            SMOKE_HOOK="$RUNNER_TEMP/smoke_ui_hook.py"
+            printf '%s\n' \
+              "import os, sys" \
+              "if not (os.environ.get('UI_SMOKE') or os.environ.get('CI')):" \
+              "    raise SystemExit(0)" \
+              "from PyQt6.QtCore import QTimer" \
+              "from PyQt6.QtWidgets import QApplication, QWidget, QLineEdit" \
+              "TARGETS = ['设置','关于','注册','Settings','About','Register','Activate','Verify','激活','验证','校验']" \
+              "INPUT_KEYS = ['激活码','授权码','注册码','License','Activation','Key','Code']" \
+              "def _walk(w: QWidget):" \
+              "    yield w" \
+              "    for c in w.findChildren(QWidget):" \
+              "        yield from _walk(c)" \
+              "def _do_click():" \
+              "    app = QApplication.instance()" \
+              "    if not app:" \
+              "        return" \
+              "    clicked = 0" \
+              "    tried_input = False" \
+              "    key = os.environ.get('UI_SMOKE_KEY','TEST-CI-DUMMY')" \
+              "    for w in app.topLevelWidgets():" \
+              "        for c in _walk(w):" \
+              "            if isinstance(c, QLineEdit) and not tried_input:" \
+              "                try:" \
+              "                    ph = c.placeholderText() or ''" \
+              "                except Exception:" \
+              "                    ph = ''" \
+              "                nm = c.objectName() or ''" \
+              "                ok = any(k.lower() in (ph.lower()+nm.lower()) for k in INPUT_KEYS)" \
+              "                if ok:" \
+              "                    try:" \
+              "                        c.setText(key)" \
+              "                        print('[UI_SMOKE] 输入激活码（已遮蔽）')" \
+              "                        tried_input = True" \
+              "                    except Exception as e:" \
+              "                        print(f\"[UI_SMOKE] 输入异常: {e}\")" \
+              "            try:" \
+              "                txt = c.text() if hasattr(c, 'text') else ''" \
+              "            except Exception:" \
+              "                txt = ''" \
+              "            obj = c.objectName() or ''" \
+              "            for k in TARGETS:" \
+              "                if (txt and k.lower() in txt.lower()) or (obj and k.lower() in obj.lower()):" \
+              "                    try:" \
+              "                        if hasattr(c, 'click'):" \
+              "                            c.click()" \
+              "                        elif hasattr(c, 'trigger'):" \
+              "                            c.trigger()" \
+              "                        print(f\"[UI_SMOKE] 点击: {txt or obj}\")" \
+              "                        clicked += 1" \
+              "                        break" \
+              "                    except Exception as e:" \
+              "                        print(f\"[UI_SMOKE] 点击异常: {e}\")" \
+              "    if clicked == 0:" \
+              "        print('[UI_SMOKE] 未找到目标控件，可能使用了自定义组件或不同文案')" \
+              "def _patch_exec():" \
+              "    try:" \
+              "        orig = QApplication.exec" \
+              "        def _wrapped(self):" \
+              "            QTimer.singleShot(1000, _do_click)" \
+              "            QTimer.singleShot(9000, QApplication.quit)" \
+              "            return orig(self)" \
+              "        QApplication.exec = _wrapped" \
+              "    except Exception as e:" \
+              "        print(f'[UI_SMOKE] Patch QApplication.exec 失败: {e}')" \
+              "_patch_exec()" \
+              > "$SMOKE_HOOK"
             PATH_ARGS=""
             [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
             [ -d obfuscated_src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src"
@@ -130,6 +202,7 @@ jobs:
             pyinstaller --noconfirm --onedir --windowed --name CursorProManager \
               $PATH_ARGS \
               --runtime-hook "$HOOK" \
+              --runtime-hook "$SMOKE_HOOK" \
               --hidden-import=logging.handlers --hidden-import=logging.config \
               --hidden-import=cryptography --hidden-import=cryptography.hazmat \
               --hidden-import=cryptography.hazmat.backends \
@@ -227,6 +300,73 @@ jobs:
               "    sys.modules['src.utils.config'] = cfg" \
               "    sys.modules['utils.config'] = cfg" \
               > "$HOOK"
+            SMOKE_HOOK="$RUNNER_TEMP/smoke_ui_hook.py"
+            printf '%s\n' \
+              "import os, sys" \
+              "if not (os.environ.get('UI_SMOKE') or os.environ.get('CI')):" \
+              "    raise SystemExit(0)" \
+              "from PyQt6.QtCore import QTimer" \
+              "from PyQt6.QtWidgets import QApplication, QWidget, QLineEdit" \
+              "TARGETS = ['设置','关于','注册','Settings','About','Register','Activate','Verify','激活','验证','校验']" \
+              "INPUT_KEYS = ['激活码','授权码','注册码','License','Activation','Key','Code']" \
+              "def _walk(w: QWidget):" \
+              "    yield w" \
+              "    for c in w.findChildren(QWidget):" \
+              "        yield from _walk(c)" \
+              "def _do_click():" \
+              "    app = QApplication.instance()" \
+              "    if not app:" \
+              "        return" \
+              "    clicked = 0" \
+              "    tried_input = False" \
+              "    key = os.environ.get('UI_SMOKE_KEY','TEST-CI-DUMMY')" \
+              "    for w in app.topLevelWidgets():" \
+              "        for c in _walk(w):" \
+              "            if isinstance(c, QLineEdit) and not tried_input:" \
+              "                try:" \
+              "                    ph = c.placeholderText() or ''" \
+              "                except Exception:" \
+              "                    ph = ''" \
+              "                nm = c.objectName() or ''" \
+              "                ok = any(k.lower() in (ph.lower()+nm.lower()) for k in INPUT_KEYS)" \
+              "                if ok:" \
+              "                    try:" \
+              "                        c.setText(key)" \
+              "                        print('[UI_SMOKE] 输入激活码（已遮蔽）')" \
+              "                        tried_input = True" \
+              "                    except Exception as e:" \
+              "                        print(f\"[UI_SMOKE] 输入异常: {e}\")" \
+              "            try:" \
+              "                txt = c.text() if hasattr(c, 'text') else ''" \
+              "            except Exception:" \
+              "                txt = ''" \
+              "            obj = c.objectName() or ''" \
+              "            for k in TARGETS:" \
+              "                if (txt and k.lower() in txt.lower()) or (obj and k.lower() in obj.lower()):" \
+              "                    try:" \
+              "                        if hasattr(c, 'click'):" \
+              "                            c.click()" \
+              "                        elif hasattr(c, 'trigger'):" \
+              "                            c.trigger()" \
+              "                        print(f\"[UI_SMOKE] 点击: {txt or obj}\")" \
+              "                        clicked += 1" \
+              "                        break" \
+              "                    except Exception as e:" \
+              "                        print(f\"[UI_SMOKE] 点击异常: {e}\")" \
+              "    if clicked == 0:" \
+              "        print('[UI_SMOKE] 未找到目标控件，可能使用了自定义组件或不同文案')" \
+              "def _patch_exec():" \
+              "    try:" \
+              "        orig = QApplication.exec" \
+              "        def _wrapped(self):" \
+              "            QTimer.singleShot(1000, _do_click)" \
+              "            QTimer.singleShot(9000, QApplication.quit)" \
+              "            return orig(self)" \
+              "        QApplication.exec = _wrapped" \
+              "    except Exception as e:" \
+              "        print(f'[UI_SMOKE] Patch QApplication.exec 失败: {e}')" \
+              "_patch_exec()" \
+              > "$SMOKE_HOOK"
             PATH_ARGS=""
             [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
             [ -d obfuscated_src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src"
@@ -234,6 +374,7 @@ jobs:
             arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 pyinstaller --noconfirm --onedir --windowed --name CursorProManager-x86_64 \
               $PATH_ARGS \
               --runtime-hook "$HOOK" \
+              --runtime-hook "$SMOKE_HOOK" \
               --hidden-import=logging.handlers --hidden-import=logging.config \
               --hidden-import=cryptography --hidden-import=cryptography.hazmat \
               --hidden-import=cryptography.hazmat.backends \
@@ -426,6 +567,68 @@ jobs:
             echo "❌ 应用可能崩溃了"; exit 1
           fi
           echo "🎉 所有核心功能验证通过！"
+
+      - name: 交互按键冒烟测试
+        env:
+          UI_SMOKE_KEY: ${{ secrets.LICENSE_KEY }}
+          LICENSE_KEY_INPUT: ${{ inputs.license_key_input }}
+        shell: bash
+        run: |
+          set +e
+          APP_PATH="$(find dist -type d -name '*.app' | head -n1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "未找到 .app"; exit 1
+          fi
+          BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
+          PLAT_DIR=""
+          for d in \
+            "$APP_PATH/Contents/MacOS/PyQt6/Qt6/plugins/platforms" \
+            "$APP_PATH/Contents/MacOS/Qt6/plugins/platforms" \
+            "$APP_PATH/Contents/Resources/PyQt6/Qt6/plugins/platforms" ; do
+            if [ -d "$d" ]; then PLAT_DIR="$d"; break; fi
+          done
+          PLUGIN_ROOT="$(dirname "$PLAT_DIR")"
+          PLATFORM="offscreen"
+          if [ -d "$PLAT_DIR" ] && ! ls "$PLAT_DIR" | grep -qi offscreen; then
+            PLATFORM="cocoa"
+          fi
+          OUT="/tmp/ui_smoke.log"
+          : > "$OUT"
+          echo "=== 交互按键冒烟测试（$PLATFORM） ==="
+          UI_KEY="${UI_SMOKE_KEY:-$LICENSE_KEY_INPUT}"
+          UI_KEY="${UI_KEY:-CI-TEST-DUMMY}"
+          QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" UI_SMOKE=1 UI_SMOKE_KEY="$UI_KEY" "$BIN" >"$OUT" 2>&1 & PID=$!
+          for i in 10 9 8 7 6 5 4 3 2 1; do
+            echo "交互测试倒计时 ${i} 秒…"; sleep 1;
+          done
+          kill -TERM "$PID" 2>/dev/null || true
+          for t in 1 2 3 4 5; do
+            if ! ps -p "$PID" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          if ps -p "$PID" >/dev/null 2>&1; then
+            kill -KILL "$PID" 2>/dev/null || true
+          fi
+          wait "$PID" 2>/dev/null; CODE=$?
+          pkill -f "$BIN" 2>/dev/null || true
+          echo "--- 最近日志 ---"
+          tail -n 200 "$OUT" || true
+          echo "退出码：$CODE"
+          if grep -q "\\[UI_SMOKE\\] 点击:" "$OUT" || grep -q "\\[UI_SMOKE\\] 未找到目标控件" "$OUT"; then
+            echo "✅ 冒烟 Hook 已执行"
+          else
+            echo "❌ 未捕获到冒烟日志"; exit 1
+          fi
+          if ! grep -Eq "Traceback|Aborted|Segmentation fault" "$OUT"; then
+            echo "✅ 无崩溃痕迹"
+          else
+            echo "❌ 存在崩溃痕迹"; exit 1
+          fi
+          if [ "$CODE" -eq 143 ] || [ "$CODE" -eq 0 ]; then
+            echo "✅ 交互按键冒烟测试通过"
+          else
+            echo "❌ 交互按键冒烟测试失败（退出码：$CODE）"; exit 1
+          fi
 
       - name: 性能基准测试
         shell: bash
