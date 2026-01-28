@@ -28,7 +28,7 @@ def prune_qt_plugins(app_path: Path):
     if trans_dir.exists():
         shutil.rmtree(trans_dir, ignore_errors=True)
     if plat_dir.exists():
-        keep = {"qcocoa.dylib", "libqcocoa.dylib"}
+        keep = {"qcocoa.dylib", "libqcocoa.dylib", "qoffscreen.dylib", "libqoffscreen.dylib"}
         for p in plat_dir.iterdir():
             if p.is_file() and p.name.lower() not in keep:
                 try: p.unlink()
