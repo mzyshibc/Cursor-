@@ -138,6 +138,17 @@ def main():
             "if mod:\n"
             "    sys.modules['src.utils.logger'] = mod\n"
             "    sys.modules['utils.logger'] = mod\n"
+            "cfg = None\n"
+            "try:\n"
+            "    import src.utils.config as cfg\n"
+            "except Exception:\n"
+            "    try:\n"
+            "        import utils.config as cfg\n"
+            "    except Exception:\n"
+            "        cfg = None\n"
+            "if cfg:\n"
+            "    sys.modules['src.utils.config'] = cfg\n"
+            "    sys.modules['utils.config'] = cfg\n"
         , encoding="utf-8")
     except Exception:
         pass
@@ -275,6 +286,8 @@ def main():
             "--hidden-import=src.utils.license_monitor",
             "--hidden-import=src.utils.logger",
             "--hidden-import=utils.logger",
+            "--hidden-import=src.utils.config",
+            "--hidden-import=utils.config",
         ])
     
     if icon_icns.exists():
