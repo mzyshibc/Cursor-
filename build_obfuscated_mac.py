@@ -157,6 +157,28 @@ def main():
         cmd.extend([
             "--hidden-import=PyQt6",
             "--hidden-import=requests",
+            "--hidden-import=logging.handlers",
+            "--hidden-import=logging.config",
+            "--hidden-import=cryptography",
+            "--hidden-import=cryptography.hazmat",
+            "--hidden-import=cryptography.hazmat.backends",
+            "--hidden-import=cryptography.hazmat.primitives",
+            "--hidden-import=cryptography.hazmat.primitives.padding",
+            "--hidden-import=cryptography.hazmat.primitives.serialization",
+            "--hidden-import=cryptography.hazmat.primitives.hashes",
+            "--hidden-import=cryptography.hazmat.primitives.ciphers",
+            "--hidden-import=cryptography.hazmat.primitives.ciphers.modes",
+            "--hidden-import=cryptography.hazmat.primitives.ciphers.algorithms",
+            "--hidden-import=cryptography.hazmat.primitives.asymmetric",
+            "--hidden-import=cryptography.hazmat.primitives.asymmetric.padding",
+            "--hidden-import=jwt",
+            "--hidden-import=psutil",
+            "--hidden-import=imaplib",
+            "--hidden-import=email",
+            "--hidden-import=email.header",
+            "--hidden-import=email.utils",
+            "--hidden-import=uuid",
+            "--hidden-import=DrissionPage",
             "--hidden-import=ui.about_widget",
             "--hidden-import=ui.settings_widget",
             "--hidden-import=ui.account_pool_widget",
@@ -192,6 +214,41 @@ def main():
             "--hidden-import=utils.version_checker",
             "--hidden-import=utils.license_monitor",
             "--hidden-import=PyQt6.QtWebSockets",
+            "--hidden-import=src.ui.about_widget",
+            "--hidden-import=src.ui.settings_widget",
+            "--hidden-import=src.ui.account_pool_widget",
+            "--hidden-import=src.ui.email_config_widget",
+            "--hidden-import=src.ui.registration_widget",
+            "--hidden-import=src.ui.account_detail_dialog",
+            "--hidden-import=src.ui.add_account_dialog",
+            "--hidden-import=src.core.registration_engine",
+            "--hidden-import=src.core.account_manager",
+            "--hidden-import=src.core.auth_injector",
+            "--hidden-import=src.core.backend_api",
+            "--hidden-import=src.core.cursor_api",
+            "--hidden-import=src.core.email_handler",
+            "--hidden-import=src.core.legacy_email_handler",
+            "--hidden-import=src.core.drission_modules",
+            "--hidden-import=src.core.drission_modules.account_storage",
+            "--hidden-import=src.core.drission_modules.auto_register",
+            "--hidden-import=src.core.drission_modules.browser_manager",
+            "--hidden-import=src.core.drission_modules.card_pool_manager",
+            "--hidden-import=src.core.drission_modules.country_codes",
+            "--hidden-import=src.core.drission_modules.cursor_switcher",
+            "--hidden-import=src.core.drission_modules.deep_token_getter",
+            "--hidden-import=src.core.drission_modules.email_verification",
+            "--hidden-import=src.core.drission_modules.machine_id_generator",
+            "--hidden-import=src.core.drission_modules.payment_handler",
+            "--hidden-import=src.core.drission_modules.phone_handler",
+            "--hidden-import=src.core.drission_modules.registration_steps",
+            "--hidden-import=src.core.drission_modules.token_handler",
+            "--hidden-import=src.core.drission_modules.turnstile_handler",
+            "--hidden-import=src.core.drission_modules.us_address_generator",
+            "--hidden-import=src.utils.crypto",
+            "--hidden-import=src.utils.app_paths",
+            "--hidden-import=src.utils.version_checker",
+            "--hidden-import=src.utils.license_monitor",
+            "--hidden-import=src.utils.logger",
         ])
     
     if icon_icns.exists():
@@ -211,6 +268,12 @@ def main():
     if not app_path.exists():
         print("❌ 未找到 .app 产物")
         sys.exit(1)
+    # 解除隔离标记，避免“已损坏”提示
+    try:
+        subprocess.run(["xattr", "-cr", str(app_path)], check=False)
+        print("✅ 已清理 quarantine 属性")
+    except Exception:
+        print("⚠️ 清理 quarantine 失败，继续后续打包")
     
     # 验证数据库是否被打包 - 更详细的检查
     print("\n🔍 验证打包的文件...")
