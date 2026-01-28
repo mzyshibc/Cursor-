@@ -97,7 +97,12 @@ jobs:
                 > src/main.py
               ENTRY="src/main.py"
             fi
+            PATH_ARGS=""
+            [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
+            [ -d obfuscated_src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src"
+            [ -d obfuscated_src/src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src/src"
             pyinstaller --noconfirm --onedir --windowed --name CursorProManager \
+              $PATH_ARGS \
               --hidden-import=logging.handlers --hidden-import=logging.config \
               --hidden-import=cryptography --hidden-import=cryptography.hazmat \
               --hidden-import=cryptography.hazmat.backends \
@@ -145,7 +150,7 @@ jobs:
               --hidden-import=src.core.drission_modules.turnstile_handler --hidden-import=src.core.drission_modules.us_address_generator \
               --hidden-import=src.utils.crypto --hidden-import=src.utils.app_paths \
               --hidden-import=src.utils.version_checker --hidden-import=src.utils.license_monitor \
-              --hidden-import=src.utils.logger "$ENTRY"
+              --hidden-import=src.utils.logger --hidden-import=utils.logger "$ENTRY"
           fi
           echo "Build step finished"
 
@@ -253,12 +258,21 @@ jobs:
             echo "No .app for smoke-run"; exit 0
           fi
           for APP_PATH in $APPS; do
-            echo "Smoke-running: $APP_PATH"
+            echo "【无界面健康检查】目标应用：$APP_PATH"
             BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
+            ARCH="$(file -b "$BIN")"
+            echo "二进制路径：$BIN"
+            echo "二进制架构：$ARCH"
+            echo "以 offscreen 模式启动，倒计时 5 秒观察初始化日志…"
             env QT_QPA_PLATFORM=offscreen "$BIN" & PID=$!
-            sleep 5
-            kill "$PID" || true
-            wait "$PID" || true
+            for i in 5 4 3 2 1; do
+              echo "等待 ${i} 秒…"
+              sleep 1
+            done
+            echo "结束进程并收集退出状态…"
+            kill "$PID" 2>/dev/null || true
+            wait "$PID"; CODE=$?
+            echo "进程退出码：$CODE"
           done
 
       - name: Upload artifact
