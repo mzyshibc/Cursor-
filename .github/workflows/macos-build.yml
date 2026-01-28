@@ -244,6 +244,37 @@ jobs:
           mkdir -p dist
           echo "首次运行：将 .app 拷贝到 /Applications 后，右键选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/CursorProManager.app\" 再打开。Apple Silicon 使用 arm64 包，Intel 使用 x86_64 包。" > dist/FirstRun.txt
 
+      - name: Smoke-run apps (offscreen)
+        shell: bash
+        run: |
+          set -e
+          APPS=$(find dist -type d -name '*.app')
+          if [ -z "$APPS" ]; then
+            echo "No .app for smoke-run"; exit 0
+          fi
+          SCRIPT="$RUNNER_TEMP/smoke.py"
+          cat > "$SCRIPT" <<'PY'
+import os, subprocess, time, signal, sys
+app = os.environ.get("APP")
+if not app:
+    sys.exit(0)
+env = os.environ.copy()
+env["QT_QPA_PLATFORM"] = "offscreen"
+p = subprocess.Popen([app], env=env)
+time.sleep(5)
+try:
+    os.kill(p.pid, signal.SIGTERM)
+except Exception:
+    pass
+code = p.poll()
+print("Exited with:", code)
+PY
+          for APP_PATH in $APPS; do
+            echo "Smoke-running: $APP_PATH"
+            BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
+            APP="$BIN" python "$SCRIPT"
+          done
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
