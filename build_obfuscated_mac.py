@@ -122,6 +122,25 @@ def main():
     name = "CursorProManager"
     icon_icns = project_root / "src" / "assets" / "icon.icns"
     base_paths = obfuscated_src if entry.parent == obfuscated_src else src_dir
+    # 运行时别名 hook（解决 src.utils.logger 与 utils.logger 双前缀导入）
+    hook_path = project_root / "rth_alias_logger.py"
+    try:
+        hook_path.write_text(
+            "import sys\n"
+            "mod = None\n"
+            "try:\n"
+            "    import src.utils.logger as mod\n"
+            "except Exception:\n"
+            "    try:\n"
+            "        import utils.logger as mod\n"
+            "    except Exception:\n"
+            "        mod = None\n"
+            "if mod:\n"
+            "    sys.modules['src.utils.logger'] = mod\n"
+            "    sys.modules['utils.logger'] = mod\n"
+        , encoding="utf-8")
+    except Exception:
+        pass
     
     # 构建 PyInstaller 命令
     cmd = [
@@ -131,8 +150,14 @@ def main():
         "--windowed",
         f"--name={name}",
         f"--paths={base_paths}",
+        f"--runtime-hook={hook_path}",
         "--osx-bundle-identifier=com.cursorvip.manager"
     ]
+    # 额外补充搜索路径（同时包含 src 与 obfuscated_src）
+    if src_dir.exists():
+        cmd.append(f"--paths={src_dir}")
+    if obfuscated_src.exists():
+        cmd.append(f"--paths={obfuscated_src}")
     
     # 添加数据文件 - 使用分号分隔
     if primary_db.exists():
@@ -249,6 +274,7 @@ def main():
             "--hidden-import=src.utils.version_checker",
             "--hidden-import=src.utils.license_monitor",
             "--hidden-import=src.utils.logger",
+            "--hidden-import=utils.logger",
         ])
     
     if icon_icns.exists():
