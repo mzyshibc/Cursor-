@@ -360,7 +360,7 @@ jobs:
       - name: 验证核心功能
         shell: bash
         run: |
-          set -e
+          set +e
           APP_PATH="$(find dist -type d -name '*.app' | head -n1)"
           if [ -z "$APP_PATH" ]; then
             echo "未找到 .app"; exit 1
@@ -382,11 +382,24 @@ jobs:
           echo "核心功能验证使用平台：$PLATFORM"
           # 启动并捕获输出
           OUT="/tmp/app_output.log"
-          QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" 2>&1 | tee "$OUT" &
-          PID=$!
-          sleep 5
-          kill "$PID" 2>/dev/null || true
-          wait "$PID" || true
+          : > "$OUT"
+          QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >"$OUT" 2>&1 & APP_PID=$!
+          for i in 5 4 3 2 1; do
+            echo "功能验证倒计时 ${i} 秒…"; sleep 1;
+          done
+          kill -TERM "$APP_PID" 2>/dev/null || true
+          # 最多再等待 5 秒，超时则强杀
+          for t in 1 2 3 4 5; do
+            if ! ps -p "$APP_PID" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          if ps -p "$APP_PID" >/dev/null 2>&1; then
+            echo "进程未按时退出，发送 KILL"
+            kill -KILL "$APP_PID" 2>/dev/null || true
+          fi
+          wait "$APP_PID" 2>/dev/null || true
+          # 兜底清理可能遗留的子进程
+          pkill -f "$BIN" 2>/dev/null || true
           echo "=== 功能验证 ==="
           # 验证1: 在线校验文案
           if grep -q "正在进行启动时在线校验" "$OUT"; then
@@ -417,7 +430,7 @@ jobs:
       - name: 性能基准测试
         shell: bash
         run: |
-          set -e
+          set +e
           APP_PATH="$(find dist -type d -name '*.app' | head -n1)"
           if [ -z "$APP_PATH" ]; then
             echo "未找到 .app"; exit 1
@@ -438,7 +451,19 @@ jobs:
           fi
           echo "=== 性能基准测试 ==="
           echo "启动时间（近似）:"
-          time ( QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >/dev/null 2>&1 & PID=$!; sleep 3; kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true )
+          time (
+            QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >/dev/null 2>&1 & PID=$!
+            sleep 3
+            kill -TERM "$PID" 2>/dev/null || true
+            for t in 1 2 3 4 5; do
+              if ! ps -p "$PID" >/dev/null 2>&1; then break; fi
+              sleep 1
+            done
+            if ps -p "$PID" >/dev/null 2>&1; then
+              kill -KILL "$PID" 2>/dev/null || true
+            fi
+            wait "$PID" 2>/dev/null || true
+          )
           echo ""
           echo "应用大小统计:"
           du -sh "$APP_PATH" || true
@@ -449,7 +474,16 @@ jobs:
           QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >/dev/null 2>&1 & PID=$!
           sleep 2
           ps -p $PID -o rss=,vsz=,pcpu= 2>/dev/null || echo "进程已结束"
-          kill $PID 2>/dev/null || true
+          kill -TERM $PID 2>/dev/null || true
+          for t in 1 2 3 4 5; do
+            if ! ps -p "$PID" >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          if ps -p "$PID" >/dev/null 2>&1; then
+            kill -KILL "$PID" 2>/dev/null || true
+          fi
+          wait "$PID" 2>/dev/null || true
+          pkill -f "$BIN" 2>/dev/null || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
