@@ -111,6 +111,17 @@ jobs:
               "if mod:" \
               "    sys.modules['src.utils.logger'] = mod" \
               "    sys.modules['utils.logger'] = mod" \
+              "cfg = None" \
+              "try:" \
+              "    import src.utils.config as cfg" \
+              "except Exception:" \
+              "    try:" \
+              "        import utils.config as cfg" \
+              "    except Exception:" \
+              "        cfg = None" \
+              "if cfg:" \
+              "    sys.modules['src.utils.config'] = cfg" \
+              "    sys.modules['utils.config'] = cfg" \
               > "$HOOK"
             PATH_ARGS=""
             [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
@@ -166,7 +177,8 @@ jobs:
               --hidden-import=src.core.drission_modules.turnstile_handler --hidden-import=src.core.drission_modules.us_address_generator \
               --hidden-import=src.utils.crypto --hidden-import=src.utils.app_paths \
               --hidden-import=src.utils.version_checker --hidden-import=src.utils.license_monitor \
-              --hidden-import=src.utils.logger --hidden-import=utils.logger "$ENTRY"
+              --hidden-import=src.utils.logger --hidden-import=utils.logger \
+              --hidden-import=src.utils.config --hidden-import=utils.config "$ENTRY"
           fi
           echo "Build step finished"
 
@@ -203,6 +215,17 @@ jobs:
               "if mod:" \
               "    sys.modules['src.utils.logger'] = mod" \
               "    sys.modules['utils.logger'] = mod" \
+              "cfg = None" \
+              "try:" \
+              "    import src.utils.config as cfg" \
+              "except Exception:" \
+              "    try:" \
+              "        import utils.config as cfg" \
+              "    except Exception:" \
+              "        cfg = None" \
+              "if cfg:" \
+              "    sys.modules['src.utils.config'] = cfg" \
+              "    sys.modules['utils.config'] = cfg" \
               > "$HOOK"
             PATH_ARGS=""
             [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
@@ -258,7 +281,8 @@ jobs:
               --hidden-import=src.core.drission_modules.turnstile_handler --hidden-import=src.core.drission_modules.us_address_generator \
               --hidden-import=src.utils.crypto --hidden-import=src.utils.app_paths \
               --hidden-import=src.utils.version_checker --hidden-import=src.utils.license_monitor \
-              --hidden-import=src.utils.logger --hidden-import=utils.logger "$ENTRY"
+              --hidden-import=src.utils.logger --hidden-import=utils.logger \
+              --hidden-import=src.utils.config --hidden-import=utils.config "$ENTRY"
           else
             echo "x86_64 environment not found; skipping x86_64 build."
           fi
