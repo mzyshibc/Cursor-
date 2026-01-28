@@ -357,6 +357,100 @@ jobs:
             fi
           done
 
+      - name: 验证核心功能
+        shell: bash
+        run: |
+          set -e
+          APP_PATH="$(find dist -type d -name '*.app' | head -n1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "未找到 .app"; exit 1
+          fi
+          BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
+          # 平台插件检测与选择
+          PLAT_DIR=""
+          for d in \
+            "$APP_PATH/Contents/MacOS/PyQt6/Qt6/plugins/platforms" \
+            "$APP_PATH/Contents/MacOS/Qt6/plugins/platforms" \
+            "$APP_PATH/Contents/Resources/PyQt6/Qt6/plugins/platforms" ; do
+            if [ -d "$d" ]; then PLAT_DIR="$d"; break; fi
+          done
+          PLUGIN_ROOT="$(dirname "$PLAT_DIR")"
+          PLATFORM="offscreen"
+          if [ -d "$PLAT_DIR" ] && ! ls "$PLAT_DIR" | grep -qi offscreen; then
+            PLATFORM="cocoa"
+          fi
+          echo "核心功能验证使用平台：$PLATFORM"
+          # 启动并捕获输出
+          OUT="/tmp/app_output.log"
+          QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" 2>&1 | tee "$OUT" &
+          PID=$!
+          sleep 5
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" || true
+          echo "=== 功能验证 ==="
+          # 验证1: 在线校验文案
+          if grep -q "正在进行启动时在线校验" "$OUT"; then
+            echo "✅ 在线校验功能正常"
+          else
+            echo "❌ 在线校验功能可能有问题"; exit 1
+          fi
+          # 验证2: 日志系统
+          if grep -q "cursor_vip.LicenseValidator" "$OUT"; then
+            echo "✅ 日志系统正常"
+          else
+            echo "❌ 日志系统可能有问题"; exit 1
+          fi
+          # 验证3: 有 WARNING / INFO
+          if grep -q "WARNING" "$OUT" && grep -q "INFO" "$OUT"; then
+            echo "✅ 错误和警告处理正常"
+          else
+            echo "⚠️ 未检测到 WARNING/INFO 日志"
+          fi
+          # 验证4: 无崩溃痕迹
+          if ! grep -Eq "Traceback|Aborted|Segmentation fault" "$OUT"; then
+            echo "✅ 应用运行稳定，无崩溃"
+          else
+            echo "❌ 应用可能崩溃了"; exit 1
+          fi
+          echo "🎉 所有核心功能验证通过！"
+
+      - name: 性能基准测试
+        shell: bash
+        run: |
+          set -e
+          APP_PATH="$(find dist -type d -name '*.app' | head -n1)"
+          if [ -z "$APP_PATH" ]; then
+            echo "未找到 .app"; exit 1
+          fi
+          BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
+          # 平台插件检测与选择
+          PLAT_DIR=""
+          for d in \
+            "$APP_PATH/Contents/MacOS/PyQt6/Qt6/plugins/platforms" \
+            "$APP_PATH/Contents/MacOS/Qt6/plugins/platforms" \
+            "$APP_PATH/Contents/Resources/PyQt6/Qt6/plugins/platforms" ; do
+            if [ -d "$d" ]; then PLAT_DIR="$d"; break; fi
+          done
+          PLUGIN_ROOT="$(dirname "$PLAT_DIR")"
+          PLATFORM="offscreen"
+          if [ -d "$PLAT_DIR" ] && ! ls "$PLAT_DIR" | grep -qi offscreen; then
+            PLATFORM="cocoa"
+          fi
+          echo "=== 性能基准测试 ==="
+          echo "启动时间（近似）:"
+          time ( QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >/dev/null 2>&1 & PID=$!; sleep 3; kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true )
+          echo ""
+          echo "应用大小统计:"
+          du -sh "$APP_PATH" || true
+          echo "二进制文件大小:"
+          du -h "$BIN" || true
+          echo ""
+          echo "启动时内存使用（近似）:"
+          QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >/dev/null 2>&1 & PID=$!
+          sleep 2
+          ps -p $PID -o rss=,vsz=,pcpu= 2>/dev/null || echo "进程已结束"
+          kill $PID 2>/dev/null || true
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
