@@ -252,27 +252,13 @@ jobs:
           if [ -z "$APPS" ]; then
             echo "No .app for smoke-run"; exit 0
           fi
-          SCRIPT="$RUNNER_TEMP/smoke.py"
-          cat > "$SCRIPT" <<'PY'
-import os, subprocess, time, signal, sys
-app = os.environ.get("APP")
-if not app:
-    sys.exit(0)
-env = os.environ.copy()
-env["QT_QPA_PLATFORM"] = "offscreen"
-p = subprocess.Popen([app], env=env)
-time.sleep(5)
-try:
-    os.kill(p.pid, signal.SIGTERM)
-except Exception:
-    pass
-code = p.poll()
-print("Exited with:", code)
-PY
           for APP_PATH in $APPS; do
             echo "Smoke-running: $APP_PATH"
             BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
-            APP="$BIN" python "$SCRIPT"
+            env QT_QPA_PLATFORM=offscreen "$BIN" & PID=$!
+            sleep 5
+            kill "$PID" || true
+            wait "$PID" || true
           done
 
       - name: Upload artifact
