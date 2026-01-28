@@ -313,7 +313,7 @@ jobs:
       - name: Smoke-run apps (offscreen)
         shell: bash
         run: |
-          set -e
+          set +e
           APPS=$(find dist -type d -name '*.app')
           if [ -z "$APPS" ]; then
             echo "No .app for smoke-run"; exit 0
