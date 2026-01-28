@@ -124,6 +124,7 @@ def main():
     base_paths = obfuscated_src if entry.parent == obfuscated_src else src_dir
     # 运行时别名 hook（解决 src.utils.logger 与 utils.logger 双前缀导入）
     hook_path = project_root / "rth_alias_logger.py"
+    smoke_hook_path = project_root / "smoke_ui_hook.py"
     try:
         hook_path.write_text(
             "import sys\n"
@@ -152,6 +153,89 @@ def main():
         , encoding="utf-8")
     except Exception:
         pass
+    try:
+        smoke_hook_path.write_text(
+            "import os, sys, threading, time, importlib\n"
+            "if not (os.environ.get('UI_SMOKE') or os.environ.get('CI')):\n"
+            "    raise SystemExit(0)\n"
+            "TARGETS = ['设置','关于','注册','Settings','About','Register','Activate','Verify','激活','验证','校验','立即激活']\n"
+            "INPUT_KEYS = ['激活码','授权码','注册码','License','Activation','Key','Code']\n"
+            "def _run():\n"
+            "    try:\n"
+            "        QtCore = importlib.import_module('PyQt6.QtCore')\n"
+            "        QtWidgets = importlib.import_module('PyQt6.QtWidgets')\n"
+            "    except Exception as e:\n"
+            "        print(f\"[UI_SMOKE] 初始化异常: {e}\")\n"
+            "        return\n"
+            "    def _walk(w):\n"
+            "        yield w\n"
+            "        for c in w.findChildren(QtWidgets.QWidget):\n"
+            "            for x in _walk(c):\n"
+            "                yield x\n"
+            "    def _do_click():\n"
+            "        app = QtWidgets.QApplication.instance()\n"
+            "        if not app:\n"
+            "            return\n"
+            "        clicked = 0\n"
+            "        tried_input = False\n"
+            "        key = os.environ.get('UI_SMOKE_KEY','TEST-CI-DUMMY')\n"
+            "        for w in app.topLevelWidgets():\n"
+            "            for c in _walk(w):\n"
+            "                try:\n"
+            "                    is_le = isinstance(c, QtWidgets.QLineEdit)\n"
+            "                except Exception:\n"
+            "                    is_le = False\n"
+            "                if is_le and not tried_input:\n"
+            "                    try:\n"
+            "                        ph = c.placeholderText() or ''\n"
+            "                    except Exception:\n"
+            "                        ph = ''\n"
+            "                    nm = c.objectName() or ''\n"
+            "                    ok = any(k.lower() in (ph.lower()+nm.lower()) for k in INPUT_KEYS)\n"
+            "                    if ok:\n"
+            "                        try:\n"
+            "                            c.setText(key)\n"
+            "                            print('[UI_SMOKE] 输入激活码（已遮蔽）')\n"
+            "                            tried_input = True\n"
+            "                        except Exception as e:\n"
+            "                            print(f\"[UI_SMOKE] 输入异常: {e}\")\n"
+            "                try:\n"
+            "                    txt = c.text() if hasattr(c,'text') else ''\n"
+            "                except Exception:\n"
+            "                    txt = ''\n"
+            "                obj = c.objectName() or ''\n"
+            "                for k in TARGETS:\n"
+            "                    if (txt and k.lower() in txt.lower()) or (obj and k.lower() in obj.lower()):\n"
+            "                        try:\n"
+            "                            if hasattr(c,'click'):\n"
+            "                                c.click()\n"
+            "                            elif hasattr(c,'trigger'):\n"
+            "                                c.trigger()\n"
+            "                            print(f\"[UI_SMOKE] 点击: {txt or obj}\")\n"
+            "                            clicked += 1\n"
+            "                            break\n"
+            "                        except Exception as e:\n"
+            "                            print(f\"[UI_SMOKE] 点击异常: {e}\")\n"
+            "        if clicked == 0:\n"
+            "            print('[UI_SMOKE] 未找到目标控件，可能使用了自定义组件或不同文案')\n"
+            "    app = QtWidgets.QApplication.instance()\n"
+            "    if app:\n"
+            "        QtCore.QTimer.singleShot(1000, _do_click)\n"
+            "        QtCore.QTimer.singleShot(9000, QtWidgets.QApplication.quit)\n"
+            "    else:\n"
+            "        def _poll():\n"
+            "            for _ in range(100):\n"
+            "                a = QtWidgets.QApplication.instance()\n"
+            "                if a:\n"
+            "                    QtCore.QTimer.singleShot(1000, _do_click)\n"
+            "                    QtCore.QTimer.singleShot(9000, QtWidgets.QApplication.quit)\n"
+            "                    return\n"
+            "                time.sleep(0.1)\n"
+            "        threading.Thread(target=_poll, daemon=True).start()\n"
+            "_run()\n"
+        , encoding="utf-8")
+    except Exception:
+        pass
     
     # 构建 PyInstaller 命令
     cmd = [
@@ -162,6 +246,7 @@ def main():
         f"--name={name}",
         f"--paths={base_paths}",
         f"--runtime-hook={hook_path}",
+        f"--runtime-hook={smoke_hook_path}",
         "--osx-bundle-identifier=com.cursorvip.manager"
     ]
     # 额外补充搜索路径（同时包含 src 与 obfuscated_src）
