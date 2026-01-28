@@ -151,6 +151,7 @@ jobs:
               "    app = QtWidgets.QApplication.instance()" \
               "    if not app:" \
               "        return" \
+              "    print('[UI_SMOKE] 开始遍历控件')" \
               "    clicked = 0" \
               "    tried_input = False" \
               "    key = os.environ.get('UI_SMOKE_KEY','TEST-CI-DUMMY')" \
@@ -191,6 +192,37 @@ jobs:
               "                        break" \
               "                    except Exception as e:" \
               "                        print(f\"[UI_SMOKE] 点击异常: {e}\")" \
+              "    if clicked == 0:" \
+              "        # 尝试点击默认按钮或接受对话框" \
+              "        try:" \
+              "            for w in app.topLevelWidgets():" \
+              "                for c in _walk(w):" \
+              "                    try:" \
+              "                        is_btn = isinstance(c, QtWidgets.QPushButton)" \
+              "                        is_def = is_btn and hasattr(c,'isDefault') and c.isDefault()" \
+              "                    except Exception:" \
+              "                        is_def = False" \
+              "                    if is_def:" \
+              "                        try:" \
+              "                            c.click()" \
+              "                            print('[UI_SMOKE] 点击默认按钮')" \
+              "                            clicked += 1" \
+              "                            raise StopIteration" \
+              "                        except Exception as e:" \
+              "                            print(f\"[UI_SMOKE] 默认按钮点击异常: {e}\")" \
+              "        except StopIteration:" \
+              "            pass" \
+              "        if clicked == 0:" \
+              "            # 尝试接受对话框" \
+              "            try:" \
+              "                for w in app.topLevelWidgets():" \
+              "                    if isinstance(w, QtWidgets.QDialog):" \
+              "                        w.accept()" \
+              "                        print('[UI_SMOKE] 调用对话框接受(accept)')" \
+              "                        clicked += 1" \
+              "                        break" \
+              "            except Exception as e:" \
+              "                print(f\"[UI_SMOKE] 对话框接受异常: {e}\")" \
               "    if clicked == 0:" \
               "        print('[UI_SMOKE] 未找到目标控件，可能使用了自定义组件或不同文案')" \
               "def _patch_exec():" \
