@@ -97,12 +97,28 @@ jobs:
                 > src/main.py
               ENTRY="src/main.py"
             fi
+            HOOK="$RUNNER_TEMP/rth_alias_logger.py"
+            printf '%s\n' \
+              "import sys" \
+              "mod = None" \
+              "try:" \
+              "    import src.utils.logger as mod" \
+              "except Exception:" \
+              "    try:" \
+              "        import utils.logger as mod" \
+              "    except Exception:" \
+              "        mod = None" \
+              "if mod:" \
+              "    sys.modules['src.utils.logger'] = mod" \
+              "    sys.modules['utils.logger'] = mod" \
+              > "$HOOK"
             PATH_ARGS=""
             [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
             [ -d obfuscated_src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src"
             [ -d obfuscated_src/src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src/src"
             pyinstaller --noconfirm --onedir --windowed --name CursorProManager \
               $PATH_ARGS \
+              --runtime-hook "$HOOK" \
               --hidden-import=logging.handlers --hidden-import=logging.config \
               --hidden-import=cryptography --hidden-import=cryptography.hazmat \
               --hidden-import=cryptography.hazmat.backends \
@@ -173,7 +189,28 @@ jobs:
           fi
           if [ -d "$HOME/miniconda-x86_64" ]; then
             echo "Building x86_64 via conda env py311..."
+            HOOK="$RUNNER_TEMP/rth_alias_logger.py"
+            printf '%s\n' \
+              "import sys" \
+              "mod = None" \
+              "try:" \
+              "    import src.utils.logger as mod" \
+              "except Exception:" \
+              "    try:" \
+              "        import utils.logger as mod" \
+              "    except Exception:" \
+              "        mod = None" \
+              "if mod:" \
+              "    sys.modules['src.utils.logger'] = mod" \
+              "    sys.modules['utils.logger'] = mod" \
+              > "$HOOK"
+            PATH_ARGS=""
+            [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
+            [ -d obfuscated_src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src"
+            [ -d obfuscated_src/src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src/src"
             arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 pyinstaller --noconfirm --onedir --windowed --name CursorProManager-x86_64 \
+              $PATH_ARGS \
+              --runtime-hook "$HOOK" \
               --hidden-import=logging.handlers --hidden-import=logging.config \
               --hidden-import=cryptography --hidden-import=cryptography.hazmat \
               --hidden-import=cryptography.hazmat.backends \
@@ -221,7 +258,7 @@ jobs:
               --hidden-import=src.core.drission_modules.turnstile_handler --hidden-import=src.core.drission_modules.us_address_generator \
               --hidden-import=src.utils.crypto --hidden-import=src.utils.app_paths \
               --hidden-import=src.utils.version_checker --hidden-import=src.utils.license_monitor \
-              --hidden-import=src.utils.logger "$ENTRY"
+              --hidden-import=src.utils.logger --hidden-import=utils.logger "$ENTRY"
           else
             echo "x86_64 environment not found; skipping x86_64 build."
           fi
