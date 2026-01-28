@@ -324,8 +324,23 @@ jobs:
             ARCH="$(file -b "$BIN")"
             echo "二进制路径：$BIN"
             echo "二进制架构：$ARCH"
-            echo "以 offscreen 模式启动，倒计时 5 秒观察初始化日志…"
-            env QT_QPA_PLATFORM=offscreen "$BIN" & PID=$!
+            # 选择平台插件并设置 QT_PLUGIN_PATH
+            PLAT_DIR=""
+            for d in \
+              "$APP_PATH/Contents/MacOS/PyQt6/Qt6/plugins/platforms" \
+              "$APP_PATH/Contents/MacOS/Qt6/plugins/platforms" \
+              "$APP_PATH/Contents/Resources/PyQt6/Qt6/plugins/platforms" ; do
+              if [ -d "$d" ]; then PLAT_DIR="$d"; break; fi
+            done
+            PLUGIN_ROOT="$(dirname "$PLAT_DIR")"
+            PLATFORM="offscreen"
+            if [ -d "$PLAT_DIR" ] && ! ls "$PLAT_DIR" | grep -qi offscreen; then
+              PLATFORM="cocoa"
+            fi
+            echo "检测到平台插件目录：${PLAT_DIR:-<未找到>}"
+            echo "选择平台：$PLATFORM"
+            echo "以 $PLATFORM 模式启动，倒计时 5 秒观察初始化日志…"
+            QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" & PID=$!
             for i in 5 4 3 2 1; do
               echo "等待 ${i} 秒…"
               sleep 1
