@@ -1,811 +1,515 @@
-name: macos-build
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
-    inputs:
-      license_key_input:
-        description: "临时授权码（仅用于CI冒烟测试）"
-        required: false
-        type: string
+import os
+import sys
+import shutil
+import subprocess
+from pathlib import Path
 
-jobs:
-  build-macos:
-    runs-on: macos-latest
-    env:
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-    steps:
-      - uses: actions/checkout@v4
+def find_plugins_dir(app_path: Path) -> Path | None:
+    candidates = [
+        app_path / "Contents" / "MacOS" / "PyQt6" / "Qt6" / "plugins",
+        app_path / "Contents" / "MacOS" / "Qt6" / "plugins",
+        app_path / "Contents" / "Resources" / "PyQt6" / "Qt6" / "plugins",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+def prune_qt_plugins(app_path: Path):
+    plugins_dir = find_plugins_dir(app_path)
+    if not plugins_dir:
+        print("⚠️ 未找到 Qt 插件目录，跳过精简")
+        return
+    img_dir = plugins_dir / "imageformats"
+    tls_dir = plugins_dir / "tls"
+    icon_dir = plugins_dir / "iconengines"
+    plat_dir = plugins_dir / "platforms"
+    print("✅ 保留所有必要的 Qt 插件，避免运行时崩溃")
+    # 不再删除翻译文件，它们可能包含必要的本地化信息
+    # 不再精简平台插件，保留所有可能需要的插件
+    # 不再精简图像格式插件，保留所有可能需要的插件
+    # 不再精简 TLS 插件，保留所有可能需要的插件
+    # 不再精简图标引擎插件，保留所有可能需要的插件
 
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/Library/Caches/pip
-            ~/.cache/pip
-          key: pip-${{ runner.os }}-py311-${{ hashFiles('**/requirements*.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-py311-
+def get_add_data_paths(project_root: Path):
+    """获取需要打包的数据文件路径"""
+    add_data_args = []
+    
+    # 数据库文件 - 只打包一个，但确保存在
+    primary_db = project_root / 'data' / 'accounts.db'
+    secondary_db = project_root / 'src' / 'data' / 'accounts.db'
+    
+    # 优先使用主位置的数据库
+    if primary_db.exists():
+        # macOS 上 PyInstaller 使用分号作为分隔符
+        add_data_args.append(f'--add-data={primary_db}:data')
+        print(f"✅ 包含数据库文件 (主位置): {primary_db}")
+    elif secondary_db.exists():
+        add_data_args.append(f'--add-data={secondary_db}:data')
+        print(f"✅ 包含数据库文件 (备用位置): {secondary_db}")
+    else:
+        print("⚠️ 未找到数据库文件，但会继续构建")
+    
+    # 其他资源文件
+    resources = [
+        ('src/assets', 'src/assets'),
+        ('src/utils/public_key.pem', 'src/utils'),
+    ]
+    
+    for src, dest in resources:
+        src_path = project_root / src
+        if src_path.exists():
+            if src_path.is_dir():
+                add_data_args.append(f'--add-data={src_path}:{dest}')
+            else:
+                add_data_args.append(f'--add-data={src_path}:{dest}')
+            print(f"✅ 包含资源: {src} -> {dest}")
+    
+    return add_data_args
 
-      - name: Install dependencies (robust)
-        shell: bash
-        run: |
-          set -e
-          python -m pip install --upgrade pip setuptools wheel
-          PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
-          for i in 1 2 3; do
-            python -m pip install --progress-bar off --default-timeout=120 $PKGS && break || { echo "retry..."; sleep 10; }
-          done
-          # 验证依赖安装
-          python -c "
-          required = ['PyQt6', 'requests', 'jwt', 'cryptography', 'lxml', 'DrissionPage', 'psutil']
-          lib_names = {
-              'jwt': 'PyJWT',
-              'PyQt6': 'PyQt6',
-              'requests': 'requests',
-              'cryptography': 'cryptography',
-              'lxml': 'lxml',
-              'DrissionPage': 'DrissionPage',
-              'psutil': 'psutil'
-          }
-          missing = []
-          for lib in required:
-              try:
-                  __import__(lib)
-                  print(f'✅ {lib_names[lib]} 已安装')
-              except ImportError:
-                  missing.append(lib_names[lib])
-                  print(f'❌ {lib_names[lib]} 未安装')
-          if missing:
-              print(f'⚠️ 缺少依赖: {missing}')
-              exit(1)
-          else:
-              print('🎉 所有依赖安装成功')
-          "
-          # 显示安装的包版本
-          python -m pip list | grep -E "PyQt6|requests|PyJWT|cryptography|lxml|DrissionPage|psutil|pyinstaller"
+def check_dependencies():
+    """检查关键依赖库是否存在"""
+    print("🔍 检查依赖库完整性...")
+    
+    required_libs = [
+        'PyQt6',
+        'requests',
+        'jwt',  # PyJWT 包的导入名称是 jwt
+        'cryptography',
+        'lxml',
+        'DrissionPage',
+        'psutil'
+    ]
+    
+    missing_libs = []
+    for lib in required_libs:
+        try:
+            __import__(lib)
+            print(f"✅ {lib} 已安装")
+        except ImportError:
+            missing_libs.append(lib)
+            print(f"❌ {lib} 未安装")
+    
+    if missing_libs:
+        print(f"⚠️ 缺少以下依赖库: {', '.join(missing_libs)}")
+        print("建议运行: pip install " + ' '.join(missing_libs))
+    else:
+        print("🎉 所有依赖库检查通过")
+    
+    return len(missing_libs) == 0
 
-      - name: Setup Rosetta and x86_64 Python (Miniconda)
-        shell: bash
-        run: |
-          set -e
-          softwareupdate --install-rosetta --agree-to-license || true
-          curl -L https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o miniconda_x64.sh
-          arch -x86_64 bash miniconda_x64.sh -b -p "$HOME/miniconda-x86_64"
-          "$HOME/miniconda-x86_64/bin/conda" create -y -n py311 python=3.11
-          PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
-          arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -m pip install --progress-bar off --default-timeout=120 $PKGS
-          # 验证 x86_64 环境的依赖安装
-          arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -c "
-          required = ['PyQt6', 'requests', 'jwt', 'cryptography', 'lxml', 'DrissionPage', 'psutil']
-          lib_names = {
-              'jwt': 'PyJWT',
-              'PyQt6': 'PyQt6',
-              'requests': 'requests',
-              'cryptography': 'cryptography',
-              'lxml': 'lxml',
-              'DrissionPage': 'DrissionPage',
-              'psutil': 'psutil'
-          }
-          missing = []
-          for lib in required:
-              try:
-                  __import__(lib)
-                  print(f'✅ {lib_names[lib]} 已安装')
-              except ImportError:
-                  missing.append(lib_names[lib])
-                  print(f'❌ {lib_names[lib]} 未安装')
-          if missing:
-              print(f'⚠️ 缺少依赖: {missing}')
-              exit(1)
-          else:
-              print('🎉 所有依赖安装成功')
-          "
-          # 显示 x86_64 环境安装的包版本
-          arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -m pip list | grep -E "PyQt6|requests|PyJWT|cryptography|lxml|DrissionPage|psutil|pyinstaller"
+def main():
+    if sys.platform != "darwin":
+        print("❌ 仅在 macOS 上运行此脚本")
+        sys.exit(1)
+    
+    # 检查依赖库完整性
+    if not check_dependencies():
+        print("⚠️ 依赖库检查失败，继续构建但可能会出现问题")
+    
+    project_root = Path(__file__).resolve().parent
+    dist_dir = project_root / "dist"
+    obfuscated_src = project_root / "obfuscated_src"
+    src_dir = project_root / "src"
+    
+    # 检查数据库文件
+    primary_db = project_root / 'data' / 'accounts.db'
+    secondary_db = project_root / 'src' / 'data' / 'accounts.db'
+    
+    if not primary_db.exists() and not secondary_db.exists():
+        print("⚠️ 未找到数据库文件，创建空的数据库...")
+        primary_db.parent.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+        conn = sqlite3.connect(primary_db)
+        conn.close()
+        print(f"✅ 已创建空数据库: {primary_db}")
+    
+    entry = obfuscated_src / "main.py" if (obfuscated_src / "main.py").exists() else src_dir / "main.py"
+    entry_dir = entry.parent
+    minimal_mode = not ((entry_dir / "ui").exists() or (entry_dir / "core").exists())
+    name = "CursorProManager"
+    icon_icns = project_root / "src" / "assets" / "icon.icns"
+    base_paths = obfuscated_src if entry.parent == obfuscated_src else src_dir
+    # 运行时别名 hook（解决 src.utils.logger 与 utils.logger 双前缀导入）
+    hook_path = project_root / "rth_alias_logger.py"
+    smoke_hook_path = project_root / "smoke_ui_hook.py"
+    try:
+        hook_path.write_text(
+            "import sys\n"
+            "mod = None\n"
+            "try:\n"
+            "    import src.utils.logger as mod\n"
+            "except Exception:\n"
+            "    try:\n"
+            "        import utils.logger as mod\n"
+            "    except Exception:\n"
+            "        mod = None\n"
+            "if mod:\n"
+            "    sys.modules['src.utils.logger'] = mod\n"
+            "    sys.modules['utils.logger'] = mod\n"
+            "cfg = None\n"
+            "try:\n"
+            "    import src.utils.config as cfg\n"
+            "except Exception:\n"
+            "    try:\n"
+            "        import utils.config as cfg\n"
+            "    except Exception:\n"
+            "        cfg = None\n"
+            "if cfg:\n"
+            "    sys.modules['src.utils.config'] = cfg\n"
+            "    sys.modules['utils.config'] = cfg\n"
+        , encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        smoke_hook_path.write_text(
+            "import os, sys, importlib\n"
+            "if not (os.environ.get('UI_SMOKE') or os.environ.get('CI')):\n"
+            "    raise SystemExit(0)\n"
+            "print('[UI_SMOKE] Hook 已加载')\n"
+            "TARGETS = ['设置','关于','注册','Settings','About','Register','Activate','Verify','激活','验证','校验','立即激活']\n"
+            "INPUT_KEYS = ['激活码','授权码','注册码','License','Activation','Key','Code']\n"
+            "try:\n"
+            "    QtCore = importlib.import_module('PyQt6.QtCore')\n"
+            "    QtWidgets = importlib.import_module('PyQt6.QtWidgets')\n"
+            "except Exception as e:\n"
+            "    print(f\"[UI_SMOKE] 初始化异常: {e}\")\n"
+            "    raise SystemExit(0)\n"
+            "def _walk(w):\n"
+            "    yield w\n"
+            "    for c in w.findChildren(QtWidgets.QWidget):\n"
+            "        for x in _walk(c):\n"
+            "            yield x\n"
+            "def _do_click():\n"
+            "    app = QtWidgets.QApplication.instance()\n"
+            "    if not app:\n"
+            "        return\n"
+            "    print('[UI_SMOKE] 开始遍历控件')\n"
+            "    clicked = 0\n"
+            "    tried_input = False\n"
+            "    key = os.environ.get('UI_SMOKE_KEY','TEST-CI-DUMMY')\n"
+            "    for w in app.topLevelWidgets():\n"
+            "        for c in _walk(w):\n"
+            "            try:\n"
+            "                is_le = isinstance(c, QtWidgets.QLineEdit)\n"
+            "            except Exception:\n"
+            "                is_le = False\n"
+            "            if is_le and not tried_input:\n"
+            "                try:\n"
+            "                    ph = c.placeholderText() or ''\n"
+            "                except Exception:\n"
+            "                    ph = ''\n"
+            "                nm = c.objectName() or ''\n"
+            "                ok = any(k.lower() in (ph.lower()+nm.lower()) for k in INPUT_KEYS)\n"
+            "                if ok:\n"
+            "                    try:\n"
+            "                        c.setText(key)\n"
+            "                        print('[UI_SMOKE] 输入激活码（已遮蔽）')\n"
+            "                        tried_input = True\n"
+            "                    except Exception as e:\n"
+            "                        print(f\"[UI_SMOKE] 输入异常: {e}\")\n"
+            "            try:\n"
+            "                txt = c.text() if hasattr(c,'text') else ''\n"
+            "            except Exception:\n"
+            "                txt = ''\n"
+            "            obj = c.objectName() or ''\n"
+            "            for k in TARGETS:\n"
+            "                if (txt and k.lower() in txt.lower()) or (obj and k.lower() in obj.lower()):\n"
+            "                    try:\n"
+            "                        if hasattr(c,'click'):\n"
+            "                            c.click()\n"
+            "                        elif hasattr(c,'trigger'):\n"
+            "                            c.trigger()\n"
+            "                        print(f\"[UI_SMOKE] 点击: {txt or obj}\")\n"
+            "                        clicked += 1\n"
+            "                        break\n"
+            "                    except Exception as e:\n"
+            "                        print(f\"[UI_SMOKE] 点击异常: {e}\")\n"
+            "    if clicked == 0:\n"
+            "        # 尝试点击默认按钮或接受对话框\n"
+            "        try:\n"
+            "            for w in app.topLevelWidgets():\n"
+            "                for c in _walk(w):\n"
+            "                    try:\n"
+            "                        is_btn = isinstance(c, QtWidgets.QPushButton)\n"
+            "                        is_def = is_btn and hasattr(c,'isDefault') and c.isDefault()\n"
+            "                    except Exception:\n"
+            "                        is_def = False\n"
+            "                    if is_def:\n"
+            "                        try:\n"
+            "                            c.click()\n"
+            "                            print('[UI_SMOKE] 点击默认按钮')\n"
+            "                            clicked += 1\n"
+            "                            raise StopIteration\n"
+            "                        except Exception as e:\n"
+            "                            print(f\"[UI_SMOKE] 默认按钮点击异常: {e}\")\n"
+            "        except StopIteration:\n"
+            "            pass\n"
+            "        if clicked == 0:\n"
+            "            # 尝试接受对话框\n"
+            "            try:\n"
+            "                for w in app.topLevelWidgets():\n"
+            "                    if isinstance(w, QtWidgets.QDialog):\n"
+            "                        w.accept()\n"
+            "                        print('[UI_SMOKE] 调用对话框接受(accept)')\n"
+            "                        clicked += 1\n"
+            "                        break\n"
+            "            except Exception as e:\n"
+            "                print(f\"[UI_SMOKE] 对话框接受异常: {e}\")\n"
+            "    if clicked == 0:\n"
+            "        print('[UI_SMOKE] 未找到目标控件，可能使用了自定义组件或不同文案')\n"
+            "def _patch_exec():\n"
+            "    try:\n"
+            "        orig = QtWidgets.QApplication.exec\n"
+            "        def _wrapped(self):\n"
+            "            QtCore.QTimer.singleShot(1000, _do_click)\n"
+            "            QtCore.QTimer.singleShot(9000, QtWidgets.QApplication.quit)\n"
+            "            return orig(self)\n"
+            "        QtWidgets.QApplication.exec = _wrapped\n"
+            "        print('[UI_SMOKE] 已挂载定时器')\n"
+            "    except Exception as e:\n"
+            "        print(f\"[UI_SMOKE] Patch QApplication.exec 失败: {e}\")\n"
+            "_patch_exec()\n"
+        , encoding="utf-8")
+    except Exception:
+        pass
+    
+    # 构建 PyInstaller 命令
+    cmd = [
+        "pyinstaller",
+        "--noconfirm",
+        "--onedir",
+        "--windowed",
+        f"--name={name}",
+        f"--paths={base_paths}",
+        f"--runtime-hook={hook_path}",
+        f"--runtime-hook={smoke_hook_path}",
+        "--osx-bundle-identifier=com.cursorvip.manager"
+    ]
+    # 额外补充搜索路径（同时包含 src 与 obfuscated_src）
+    if src_dir.exists():
+        cmd.append(f"--paths={src_dir}")
+    if obfuscated_src.exists():
+        cmd.append(f"--paths={obfuscated_src}")
+    
+    # 添加数据文件 - 使用分号分隔
+    if primary_db.exists():
+        cmd.append(f"--add-data={primary_db}:data")
+        print(f"✅ 包含数据库文件: {primary_db}")
+    elif secondary_db.exists():
+        cmd.append(f"--add-data={secondary_db}:data")
+        print(f"✅ 包含数据库文件: {secondary_db}")
+    
+    # 添加其他资源文件
+    if (project_root / "src" / "assets").exists():
+        cmd.append(f"--add-data={project_root / 'src' / 'assets'}:src/assets")
+        print("✅ 包含资源: src/assets")
+    
+    if (project_root / "src" / "utils" / "public_key.pem").exists():
+        cmd.append(f"--add-data={project_root / 'src' / 'utils' / 'public_key.pem'}:src/utils")
+        print("✅ 包含资源: src/utils/public_key.pem")
+    
+    if minimal_mode:
+        pass
+    else:
+        cmd.extend([
+            "--hidden-import=PyQt6",
+            "--hidden-import=requests",
+            "--hidden-import=logging.handlers",
+            "--hidden-import=logging.config",
+            "--hidden-import=cryptography",
+            "--hidden-import=cryptography.hazmat",
+            "--hidden-import=cryptography.hazmat.backends",
+            "--hidden-import=cryptography.hazmat.primitives",
+            "--hidden-import=cryptography.hazmat.primitives.padding",
+            "--hidden-import=cryptography.hazmat.primitives.serialization",
+            "--hidden-import=cryptography.hazmat.primitives.hashes",
+            "--hidden-import=cryptography.hazmat.primitives.ciphers",
+            "--hidden-import=cryptography.hazmat.primitives.ciphers.modes",
+            "--hidden-import=cryptography.hazmat.primitives.ciphers.algorithms",
+            "--hidden-import=cryptography.hazmat.primitives.asymmetric",
+            "--hidden-import=cryptography.hazmat.primitives.asymmetric.padding",
+            "--hidden-import=jwt",
+            "--hidden-import=psutil",
+            "--hidden-import=imaplib",
+            "--hidden-import=email",
+            "--hidden-import=email.header",
+            "--hidden-import=email.utils",
+            "--hidden-import=uuid",
+            "--hidden-import=DrissionPage",
+            "--hidden-import=ui.about_widget",
+            "--hidden-import=ui.settings_widget",
+            "--hidden-import=ui.account_pool_widget",
+            "--hidden-import=ui.email_config_widget",
+            "--hidden-import=ui.registration_widget",
+            "--hidden-import=ui.account_detail_dialog",
+            "--hidden-import=ui.add_account_dialog",
+            "--hidden-import=core.registration_engine",
+            "--hidden-import=core.account_manager",
+            "--hidden-import=core.auth_injector",
+            "--hidden-import=core.backend_api",
+            "--hidden-import=core.cursor_api",
+            "--hidden-import=core.email_handler",
+            "--hidden-import=core.legacy_email_handler",
+            "--hidden-import=core.drission_modules",
+            "--hidden-import=core.drission_modules.account_storage",
+            "--hidden-import=core.drission_modules.auto_register",
+            "--hidden-import=core.drission_modules.browser_manager",
+            "--hidden-import=core.drission_modules.card_pool_manager",
+            "--hidden-import=core.drission_modules.country_codes",
+            "--hidden-import=core.drission_modules.cursor_switcher",
+            "--hidden-import=core.drission_modules.deep_token_getter",
+            "--hidden-import=core.drission_modules.email_verification",
+            "--hidden-import=core.drission_modules.machine_id_generator",
+            "--hidden-import=core.drission_modules.payment_handler",
+            "--hidden-import=core.drission_modules.phone_handler",
+            "--hidden-import=core.drission_modules.registration_steps",
+            "--hidden-import=core.drission_modules.token_handler",
+            "--hidden-import=core.drission_modules.turnstile_handler",
+            "--hidden-import=core.drission_modules.us_address_generator",
+            "--hidden-import=utils.crypto",
+            "--hidden-import=utils.app_paths",
+            "--hidden-import=utils.version_checker",
+            "--hidden-import=utils.license_monitor",
+            "--hidden-import=PyQt6.QtWebSockets",
+            "--hidden-import=src.ui.about_widget",
+            "--hidden-import=src.ui.settings_widget",
+            "--hidden-import=src.ui.account_pool_widget",
+            "--hidden-import=src.ui.email_config_widget",
+            "--hidden-import=src.ui.registration_widget",
+            "--hidden-import=src.ui.account_detail_dialog",
+            "--hidden-import=src.ui.add_account_dialog",
+            "--hidden-import=src.core.registration_engine",
+            "--hidden-import=src.core.account_manager",
+            "--hidden-import=src.core.auth_injector",
+            "--hidden-import=src.core.backend_api",
+            "--hidden-import=src.core.cursor_api",
+            "--hidden-import=src.core.email_handler",
+            "--hidden-import=src.core.legacy_email_handler",
+            "--hidden-import=src.core.drission_modules",
+            "--hidden-import=src.core.drission_modules.account_storage",
+            "--hidden-import=src.core.drission_modules.auto_register",
+            "--hidden-import=src.core.drission_modules.browser_manager",
+            "--hidden-import=src.core.drission_modules.card_pool_manager",
+            "--hidden-import=src.core.drission_modules.country_codes",
+            "--hidden-import=src.core.drission_modules.cursor_switcher",
+            "--hidden-import=src.core.drission_modules.deep_token_getter",
+            "--hidden-import=src.core.drission_modules.email_verification",
+            "--hidden-import=src.core.drission_modules.machine_id_generator",
+            "--hidden-import=src.core.drission_modules.payment_handler",
+            "--hidden-import=src.core.drission_modules.phone_handler",
+            "--hidden-import=src.core.drission_modules.registration_steps",
+            "--hidden-import=src.core.drission_modules.token_handler",
+            "--hidden-import=src.core.drission_modules.turnstile_handler",
+            "--hidden-import=src.core.drission_modules.us_address_generator",
+            "--hidden-import=src.utils.crypto",
+            "--hidden-import=src.utils.app_paths",
+            "--hidden-import=src.utils.version_checker",
+            "--hidden-import=src.utils.license_monitor",
+            "--hidden-import=src.utils.logger",
+            "--hidden-import=utils.logger",
+            "--hidden-import=src.utils.config",
+            "--hidden-import=utils.config",
+        ])
+    
+    if icon_icns.exists():
+        cmd.append(f"--icon={icon_icns}")
+    
+    cmd.append(str(entry))
+    
+    print("🔨 正在为 macOS 构建...")
+    print("执行命令:", " ".join(cmd))
+    
+    r = subprocess.run(cmd, cwd=project_root)
+    if r.returncode != 0:
+        print("❌ 构建失败")
+        sys.exit(1)
+    
+    app_path = dist_dir / f"{name}.app"
+    if not app_path.exists():
+        print("❌ 未找到 .app 产物")
+        sys.exit(1)
+    # 解除隔离标记，避免“已损坏”提示
+    try:
+        subprocess.run(["xattr", "-cr", str(app_path)], check=False)
+        print("✅ 已清理 quarantine 属性")
+    except Exception:
+        print("⚠️ 清理 quarantine 失败，继续后续打包")
+    
+    # 验证数据库是否被打包 - 更详细的检查
+    print("\n🔍 验证打包的文件...")
+    
+    # 检查多个可能的位置
+    possible_locations = [
+        app_path / "Contents" / "MacOS" / "data" / "accounts.db",
+        app_path / "Contents" / "Resources" / "data" / "accounts.db",
+        app_path / "Contents" / "MacOS" / "accounts.db",  # 可能在根目录
+    ]
+    
+    found = False
+    for location in possible_locations:
+        if location.exists():
+            print(f"✅ 数据库已成功打包到应用中: {location}")
+            found = True
+            break
+    
+    if not found:
+        print("⚠️ 数据库文件未找到，搜索整个应用...")
+        # 搜索整个应用包
+        for root, dirs, files in os.walk(app_path):
+            for file in files:
+                if file == "accounts.db":
+                    db_path = Path(root) / file
+                    print(f"✅ 在非标准位置找到数据库: {db_path}")
+                    found = True
+                    break
+            if found:
+                break
+        
+        if not found:
+            print("❌ 数据库中未找到，检查应用内结构:")
+            # 列出应用包的结构
+            for root, dirs, files in os.walk(app_path / "Contents"):
+                level = root.replace(str(app_path / "Contents"), '').count(os.sep)
+                indent = ' ' * 2 * level
+                print(f'{indent}{os.path.basename(root)}/')
+                subindent = ' ' * 2 * (level + 1)
+                for file in files[:10]:  # 只显示前10个文件
+                    print(f'{subindent}{file}')
+                if len(files) > 10:
+                    print(f'{subindent}... 还有 {len(files)-10} 个文件')
+    
+    # 检查 _MEIPASS 中的文件
+    print("\n🔍 检查 _MEIPASS 目录内容:")
+    # 查找 _MEIPASS 目录（通常是 Contents/MacOS 下的某个目录）
+    macos_dir = app_path / "Contents" / "MacOS"
+    if macos_dir.exists():
+        for item in macos_dir.iterdir():
+            if item.is_dir() and item.name.startswith("_MEI"):
+                print(f"✅ 找到 _MEIPASS 目录: {item.name}")
+                # 列出其中的文件和目录
+                for subitem in item.iterdir():
+                    if subitem.is_dir():
+                        print(f"  📁 {subitem.name}/")
+                        if subitem.name == "data":
+                            print(f"    ✅ 找到 data 目录")
+                            db_files = list(subitem.glob("*.db"))
+                            for db in db_files:
+                                print(f"    📄 {db.name}")
+                    else:
+                        print(f"  📄 {subitem.name}")
+    
+    prune_qt_plugins(app_path)
+    
+    zip_path = dist_dir / f"{name}-mac.zip"
+    if shutil.which("ditto"):
+        subprocess.run(["ditto","-c","-k","--sequesterRsrc","--keepParent",str(app_path),str(zip_path)], check=False)
+        print(f"📦 已生成 ZIP: {zip_path}")
+    else:
+        shutil.make_archive(str(zip_path).removesuffix(".zip"), "zip", app_path.parent, app_path.name)
+        print(f"📦 已生成 ZIP: {zip_path}")
+    
+    print("🎉 macOS 构建完成")
 
-      - name: Unpack sources
-        shell: bash
-        run: |
-          set -e
-          if [ -f src.zip ]; then
-            echo "Unpacking via ditto..."
-            ditto -x -k src.zip .
-          else
-            echo "src.zip not found; using repo tree if present"
-          fi
-          echo "Find main.py:"; find . -maxdepth 3 -type f -name main.py || true
-
-      - name: Build (script + fallback with dynamic entry)
-        shell: bash
-        run: |
-          set +e
-          ENTRY=""
-          if [ -f src/main.py ]; then
-            ENTRY="src/main.py"
-          elif [ -f main.py ]; then
-            ENTRY="main.py"
-          else
-            FOUND="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
-            [ -n "$FOUND" ] && ENTRY="$FOUND"
-          fi
-          echo "Selected ENTRY: ${ENTRY:-<none>}"
-
-          if [ -f build_obfuscated_mac.py ]; then
-            echo "Trying build_obfuscated_mac.py..."
-            python build_obfuscated_mac.py
-            STATUS=$?
-          else
-            STATUS=1
-          fi
-
-          if [ $STATUS -ne 0 ]; then
-            echo "Fallback: building directly with PyInstaller"
-            if [ -z "$ENTRY" ]; then
-              echo "No main.py found; creating minimal src/main.py"
-              rm -rf src && mkdir -p src
-              printf '%s\n' \
-                'import sys' \
-                'from PyQt6.QtWidgets import QApplication, QLabel' \
-                'if __name__ == "__main__":' \
-                '    app = QApplication(sys.argv)' \
-                '    label = QLabel("CursorProManager (placeholder build)")' \
-                '    label.show()' \
-                '    sys.exit(app.exec())' \
-                > src/main.py
-              ENTRY="src/main.py"
-            fi
-            HOOK="$RUNNER_TEMP/rth_alias_logger.py"
-            printf '%s\n' \
-              "import sys" \
-              "mod = None" \
-              "try:" \
-              "    import src.utils.logger as mod" \
-              "except Exception:" \
-              "    try:" \
-              "        import utils.logger as mod" \
-              "    except Exception:" \
-              "        mod = None" \
-              "if mod:" \
-              "    sys.modules['src.utils.logger'] = mod" \
-              "    sys.modules['utils.logger'] = mod" \
-              "cfg = None" \
-              "try:" \
-              "    import src.utils.config as cfg" \
-              "except Exception:" \
-              "    try:" \
-              "        import utils.config as cfg" \
-              "    except Exception:" \
-              "        cfg = None" \
-              "if cfg:" \
-              "    sys.modules['src.utils.config'] = cfg" \
-              "    sys.modules['utils.config'] = cfg" \
-              > "$HOOK"
-            SMOKE_HOOK="$RUNNER_TEMP/smoke_ui_hook.py"
-            printf '%s\n' \
-              "import os, sys, importlib" \
-              "if not (os.environ.get('UI_SMOKE') or os.environ.get('CI')):" \
-              "    raise SystemExit(0)" \
-              "print('[UI_SMOKE] Hook 已加载')" \
-              "TARGETS = ['设置','关于','注册','Settings','About','Register','Activate','Verify','激活','验证','校验','立即激活']" \
-              "INPUT_KEYS = ['激活码','授权码','注册码','License','Activation','Key','Code']" \
-              "try:" \
-              "    QtCore = importlib.import_module('PyQt6.QtCore')" \
-              "    QtWidgets = importlib.import_module('PyQt6.QtWidgets')" \
-              "except Exception as e:" \
-              "    print(f\"[UI_SMOKE] 初始化异常: {e}\")" \
-              "    raise SystemExit(0)" \
-              "def _walk(w):" \
-              "    yield w" \
-              "    for c in w.findChildren(QtWidgets.QWidget):" \
-              "        for x in _walk(c):" \
-              "            yield x" \
-              "def _do_click():" \
-              "    app = QtWidgets.QApplication.instance()" \
-              "    if not app:" \
-              "        return" \
-              "    print('[UI_SMOKE] 开始遍历控件')" \
-              "    clicked = 0" \
-              "    tried_input = False" \
-              "    key = os.environ.get('UI_SMOKE_KEY','TEST-CI-DUMMY')" \
-              "    for w in app.topLevelWidgets():" \
-              "        for c in _walk(w):" \
-              "            try:" \
-              "                is_le = isinstance(c, QtWidgets.QLineEdit)" \
-              "            except Exception:" \
-              "                is_le = False" \
-              "            if is_le and not tried_input:" \
-              "                try:" \
-              "                    ph = c.placeholderText() or ''" \
-              "                except Exception:" \
-              "                    ph = ''" \
-              "                nm = c.objectName() or ''" \
-              "                ok = any(k.lower() in (ph.lower()+nm.lower()) for k in INPUT_KEYS)" \
-              "                if ok:" \
-              "                    try:" \
-              "                        c.setText(key)" \
-              "                        print('[UI_SMOKE] 输入激活码（已遮蔽）')" \
-              "                        tried_input = True" \
-              "                    except Exception as e:" \
-              "                        print(f\"[UI_SMOKE] 输入异常: {e}\")" \
-              "            try:" \
-              "                txt = c.text() if hasattr(c,'text') else ''" \
-              "            except Exception:" \
-              "                txt = ''" \
-              "            obj = c.objectName() or ''" \
-              "            for k in TARGETS:" \
-              "                if (txt and k.lower() in txt.lower()) or (obj and k.lower() in obj.lower()):" \
-              "                    try:" \
-              "                        if hasattr(c,'click'):" \
-              "                            c.click()" \
-              "                        elif hasattr(c,'trigger'):" \
-              "                            c.trigger()" \
-              "                        print(f\"[UI_SMOKE] 点击: {txt or obj}\")" \
-              "                        clicked += 1" \
-              "                        break" \
-              "                    except Exception as e:" \
-              "                        print(f\"[UI_SMOKE] 点击异常: {e}\")" \
-              "    if clicked == 0:" \
-              "        # 尝试点击默认按钮或接受对话框" \
-              "        try:" \
-              "            for w in app.topLevelWidgets():" \
-              "                for c in _walk(w):" \
-              "                    try:" \
-              "                        is_btn = isinstance(c, QtWidgets.QPushButton)" \
-              "                        is_def = is_btn and hasattr(c,'isDefault') and c.isDefault()" \
-              "                    except Exception:" \
-              "                        is_def = False" \
-              "                    if is_def:" \
-              "                        try:" \
-              "                            c.click()" \
-              "                            print('[UI_SMOKE] 点击默认按钮')" \
-              "                            clicked += 1" \
-              "                            raise StopIteration" \
-              "                        except Exception as e:" \
-              "                            print(f\"[UI_SMOKE] 默认按钮点击异常: {e}\")" \
-              "        except StopIteration:" \
-              "            pass" \
-              "        if clicked == 0:" \
-              "            # 尝试接受对话框" \
-              "            try:" \
-              "                for w in app.topLevelWidgets():" \
-              "                    if isinstance(w, QtWidgets.QDialog):" \
-              "                        w.accept()" \
-              "                        print('[UI_SMOKE] 调用对话框接受(accept)')" \
-              "                        clicked += 1" \
-              "                        break" \
-              "            except Exception as e:" \
-              "                print(f\"[UI_SMOKE] 对话框接受异常: {e}\")" \
-              "    if clicked == 0:" \
-              "        print('[UI_SMOKE] 未找到目标控件，可能使用了自定义组件或不同文案')" \
-              "def _patch_exec():" \
-              "    try:" \
-              "        orig = QtWidgets.QApplication.exec" \
-              "        def _wrapped(self):" \
-              "            QtCore.QTimer.singleShot(1000, _do_click)" \
-              "            QtCore.QTimer.singleShot(9000, QtWidgets.QApplication.quit)" \
-              "            return orig(self)" \
-              "        QtWidgets.QApplication.exec = _wrapped" \
-              "        print('[UI_SMOKE] 已挂载定时器')" \
-              "    except Exception as e:" \
-              "        print(f\"[UI_SMOKE] Patch QApplication.exec 失败: {e}\")" \
-              "_patch_exec()" \
-              > "$SMOKE_HOOK"
-            PATH_ARGS=""
-            [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
-            [ -d obfuscated_src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src"
-            [ -d obfuscated_src/src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src/src"
-            pyinstaller --noconfirm --onedir --windowed --name CursorProManager \
-              $PATH_ARGS \
-              --runtime-hook "$HOOK" \
-              --runtime-hook "$SMOKE_HOOK" \
-              --hidden-import=logging.handlers --hidden-import=logging.config \
-              --hidden-import=cryptography --hidden-import=cryptography.hazmat \
-              --hidden-import=cryptography.hazmat.backends \
-              --hidden-import=cryptography.hazmat.primitives \
-              --hidden-import=cryptography.hazmat.primitives.padding \
-              --hidden-import=cryptography.hazmat.primitives.serialization \
-              --hidden-import=cryptography.hazmat.primitives.hashes \
-              --hidden-import=cryptography.hazmat.primitives.ciphers \
-              --hidden-import=cryptography.hazmat.primitives.ciphers.modes \
-              --hidden-import=cryptography.hazmat.primitives.ciphers.algorithms \
-              --hidden-import=cryptography.hazmat.primitives.asymmetric \
-              --hidden-import=cryptography.hazmat.primitives.asymmetric.padding \
-              --hidden-import=jwt --hidden-import=psutil --hidden-import=imaplib \
-              --hidden-import=email --hidden-import=email.header --hidden-import=email.utils \
-              --hidden-import=uuid --hidden-import=DrissionPage \
-              --hidden-import=ui.about_widget --hidden-import=ui.settings_widget \
-              --hidden-import=ui.account_pool_widget --hidden-import=ui.email_config_widget \
-              --hidden-import=ui.registration_widget --hidden-import=ui.account_detail_dialog \
-              --hidden-import=ui.add_account_dialog --hidden-import=core.registration_engine \
-              --hidden-import=core.account_manager --hidden-import=core.auth_injector \
-              --hidden-import=core.backend_api --hidden-import=core.cursor_api \
-              --hidden-import=core.email_handler --hidden-import=core.legacy_email_handler \
-              --hidden-import=core.drission_modules --hidden-import=core.drission_modules.account_storage \
-              --hidden-import=core.drission_modules.auto_register --hidden-import=core.drission_modules.browser_manager \
-              --hidden-import=core.drission_modules.card_pool_manager --hidden-import=core.drission_modules.country_codes \
-              --hidden-import=core.drission_modules.cursor_switcher --hidden-import=core.drission_modules.deep_token_getter \
-              --hidden-import=core.drission_modules.email_verification --hidden-import=core.drission_modules.machine_id_generator \
-              --hidden-import=core.drission_modules.payment_handler --hidden-import=core.drission_modules.phone_handler \
-              --hidden-import=core.drission_modules.registration_steps --hidden-import=core.drission_modules.token_handler \
-              --hidden-import=core.drission_modules.turnstile_handler --hidden-import=core.drission_modules.us_address_generator \
-              --hidden-import=src.ui.about_widget --hidden-import=src.ui.settings_widget \
-              --hidden-import=src.ui.account_pool_widget --hidden-import=src.ui.email_config_widget \
-              --hidden-import=src.ui.registration_widget --hidden-import=src.ui.account_detail_dialog \
-              --hidden-import=src.ui.add_account_dialog --hidden-import=src.core.registration_engine \
-              --hidden-import=src.core.account_manager --hidden-import=src.core.auth_injector \
-              --hidden-import=src.core.backend_api --hidden-import=src.core.cursor_api \
-              --hidden-import=src.core.email_handler --hidden-import=src.core.legacy_email_handler \
-              --hidden-import=src.core.drission_modules --hidden-import=src.core.drission_modules.account_storage \
-              --hidden-import=src.core.drission_modules.auto_register --hidden-import=src.core.drission_modules.browser_manager \
-              --hidden-import=src.core.drission_modules.card_pool_manager --hidden-import=src.core.drission_modules.country_codes \
-              --hidden-import=src.core.drission_modules.cursor_switcher --hidden-import=src.core.drission_modules.deep_token_getter \
-              --hidden-import=src.core.drission_modules.email_verification --hidden-import=src.core.drission_modules.machine_id_generator \
-              --hidden-import=src.core.drission_modules.payment_handler --hidden-import=src.core.drission_modules.phone_handler \
-              --hidden-import=src.core.drission_modules.registration_steps --hidden-import=src.core.drission_modules.token_handler \
-              --hidden-import=src.core.drission_modules.turnstile_handler --hidden-import=src.core.drission_modules.us_address_generator \
-              --hidden-import=src.utils.crypto --hidden-import=src.utils.app_paths \
-              --hidden-import=src.utils.version_checker --hidden-import=src.utils.license_monitor \
-              --hidden-import=src.utils.logger --hidden-import=utils.logger \
-              --hidden-import=src.utils.config --hidden-import=utils.config "$ENTRY"
-          fi
-          echo "Build step finished"
-
-      - name: Build x86_64 with Rosetta (if available)
-        shell: bash
-        run: |
-          set -e
-          ENTRY=""
-          if [ -f src/main.py ]; then
-            ENTRY="src/main.py"
-          elif [ -f main.py ]; then
-            ENTRY="main.py"
-          else
-            FOUND="$(find . -maxdepth 25 -type f -name main.py | head -n1)"
-            [ -n "$FOUND" ] && ENTRY="$FOUND"
-          fi
-          echo "Selected ENTRY: ${ENTRY:-<none>}"
-          if [ -z "$ENTRY" ]; then
-            exit 0
-          fi
-          if [ -d "$HOME/miniconda-x86_64" ]; then
-            echo "Building x86_64 via conda env py311..."
-            HOOK="$RUNNER_TEMP/rth_alias_logger.py"
-            printf '%s\n' \
-              "import sys" \
-              "mod = None" \
-              "try:" \
-              "    import src.utils.logger as mod" \
-              "except Exception:" \
-              "    try:" \
-              "        import utils.logger as mod" \
-              "    except Exception:" \
-              "        mod = None" \
-              "if mod:" \
-              "    sys.modules['src.utils.logger'] = mod" \
-              "    sys.modules['utils.logger'] = mod" \
-              "cfg = None" \
-              "try:" \
-              "    import src.utils.config as cfg" \
-              "except Exception:" \
-              "    try:" \
-              "        import utils.config as cfg" \
-              "    except Exception:" \
-              "        cfg = None" \
-              "if cfg:" \
-              "    sys.modules['src.utils.config'] = cfg" \
-              "    sys.modules['utils.config'] = cfg" \
-              > "$HOOK"
-            SMOKE_HOOK="$RUNNER_TEMP/smoke_ui_hook.py"
-            printf '%s\n' \
-              "import os, sys, importlib" \
-              "if not (os.environ.get('UI_SMOKE') or os.environ.get('CI')):" \
-              "    raise SystemExit(0)" \
-              "print('[UI_SMOKE] Hook 已加载')" \
-              "TARGETS = ['设置','关于','注册','Settings','About','Register','Activate','Verify','激活','验证','校验','立即激活']" \
-              "INPUT_KEYS = ['激活码','授权码','注册码','License','Activation','Key','Code']" \
-              "try:" \
-              "    QtCore = importlib.import_module('PyQt6.QtCore')" \
-              "    QtWidgets = importlib.import_module('PyQt6.QtWidgets')" \
-              "except Exception as e:" \
-              "    print(f\"[UI_SMOKE] 初始化异常: {e}\")" \
-              "    raise SystemExit(0)" \
-              "def _walk(w):" \
-              "    yield w" \
-              "    for c in w.findChildren(QtWidgets.QWidget):" \
-              "        for x in _walk(c):" \
-              "            yield x" \
-              "def _do_click():" \
-              "    app = QtWidgets.QApplication.instance()" \
-              "    if not app:" \
-              "        return" \
-              "    clicked = 0" \
-              "    tried_input = False" \
-              "    key = os.environ.get('UI_SMOKE_KEY','TEST-CI-DUMMY')" \
-              "    for w in app.topLevelWidgets():" \
-              "        for c in _walk(w):" \
-              "            try:" \
-              "                is_le = isinstance(c, QtWidgets.QLineEdit)" \
-              "            except Exception:" \
-              "                is_le = False" \
-              "            if is_le and not tried_input:" \
-              "                try:" \
-              "                    ph = c.placeholderText() or ''" \
-              "                except Exception:" \
-              "                    ph = ''" \
-              "                nm = c.objectName() or ''" \
-              "                ok = any(k.lower() in (ph.lower()+nm.lower()) for k in INPUT_KEYS)" \
-              "                if ok:" \
-              "                    try:" \
-              "                        c.setText(key)" \
-              "                        print('[UI_SMOKE] 输入激活码（已遮蔽）')" \
-              "                        tried_input = True" \
-              "                    except Exception as e:" \
-              "                        print(f\"[UI_SMOKE] 输入异常: {e}\")" \
-              "            try:" \
-              "                txt = c.text() if hasattr(c,'text') else ''" \
-              "            except Exception:" \
-              "                txt = ''" \
-              "            obj = c.objectName() or ''" \
-              "            for k in TARGETS:" \
-              "                if (txt and k.lower() in txt.lower()) or (obj and k.lower() in obj.lower()):" \
-              "                    try:" \
-              "                        if hasattr(c,'click'):" \
-              "                            c.click()" \
-              "                        elif hasattr(c,'trigger'):" \
-              "                            c.trigger()" \
-              "                        print(f\"[UI_SMOKE] 点击: {txt or obj}\")" \
-              "                        clicked += 1" \
-              "                        break" \
-              "                    except Exception as e:" \
-              "                        print(f\"[UI_SMOKE] 点击异常: {e}\")" \
-              "    if clicked == 0:" \
-              "        print('[UI_SMOKE] 未找到目标控件，可能使用了自定义组件或不同文案')" \
-              "def _patch_exec():" \
-              "    try:" \
-              "        orig = QtWidgets.QApplication.exec" \
-              "        def _wrapped(self):" \
-              "            QtCore.QTimer.singleShot(1000, _do_click)" \
-              "            QtCore.QTimer.singleShot(9000, QtWidgets.QApplication.quit)" \
-              "            return orig(self)" \
-              "        QtWidgets.QApplication.exec = _wrapped" \
-              "        print('[UI_SMOKE] 已挂载定时器')" \
-              "    except Exception as e:" \
-              "        print(f\"[UI_SMOKE] Patch QApplication.exec 失败: {e}\")" \
-              "_patch_exec()" \
-              > "$SMOKE_HOOK"
-            PATH_ARGS=""
-            [ -d src ] && PATH_ARGS="$PATH_ARGS --paths=src"
-            [ -d obfuscated_src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src"
-            [ -d obfuscated_src/src ] && PATH_ARGS="$PATH_ARGS --paths=obfuscated_src/src"
-            arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 pyinstaller --noconfirm --onedir --windowed --name CursorProManager-x86_64 \
-              $PATH_ARGS \
-              --runtime-hook "$HOOK" \
-              --runtime-hook "$SMOKE_HOOK" \
-              --hidden-import=logging.handlers --hidden-import=logging.config \
-              --hidden-import=cryptography --hidden-import=cryptography.hazmat \
-              --hidden-import=cryptography.hazmat.backends \
-              --hidden-import=cryptography.hazmat.primitives \
-              --hidden-import=cryptography.hazmat.primitives.padding \
-              --hidden-import=cryptography.hazmat.primitives.serialization \
-              --hidden-import=cryptography.hazmat.primitives.hashes \
-              --hidden-import=cryptography.hazmat.primitives.ciphers \
-              --hidden-import=cryptography.hazmat.primitives.ciphers.modes \
-              --hidden-import=cryptography.hazmat.primitives.ciphers.algorithms \
-              --hidden-import=cryptography.hazmat.primitives.asymmetric \
-              --hidden-import=cryptography.hazmat.primitives.asymmetric.padding \
-              --hidden-import=jwt --hidden-import=psutil --hidden-import=imaplib \
-              --hidden-import=email --hidden-import=email.header --hidden-import=email.utils \
-              --hidden-import=uuid --hidden-import=DrissionPage \
-              --hidden-import=ui.about_widget --hidden-import=ui.settings_widget \
-              --hidden-import=ui.account_pool_widget --hidden-import=ui.email_config_widget \
-              --hidden-import=ui.registration_widget --hidden-import=ui.account_detail_dialog \
-              --hidden-import=ui.add_account_dialog --hidden-import=core.registration_engine \
-              --hidden-import=core.account_manager --hidden-import=core.auth_injector \
-              --hidden-import=core.backend_api --hidden-import=core.cursor_api \
-              --hidden-import=core.email_handler --hidden-import=core.legacy_email_handler \
-              --hidden-import=core.drission_modules --hidden-import=core.drission_modules.account_storage \
-              --hidden-import=core.drission_modules.auto_register --hidden-import=core.drission_modules.browser_manager \
-              --hidden-import=core.drission_modules.card_pool_manager --hidden-import=core.drission_modules.country_codes \
-              --hidden-import=core.drission_modules.cursor_switcher --hidden-import=core.drission_modules.deep_token_getter \
-              --hidden-import=core.drission_modules.email_verification --hidden-import=core.drission_modules.machine_id_generator \
-              --hidden-import=core.drission_modules.payment_handler --hidden-import=core.drission_modules.phone_handler \
-              --hidden-import=core.drission_modules.registration_steps --hidden-import=core.drission_modules.token_handler \
-              --hidden-import=core.drission_modules.turnstile_handler --hidden-import=core.drission_modules.us_address_generator \
-              --hidden-import=src.ui.about_widget --hidden-import=src.ui.settings_widget \
-              --hidden-import=src.ui.account_pool_widget --hidden-import=src.ui.email_config_widget \
-              --hidden-import=src.ui.registration_widget --hidden-import=src.ui.account_detail_dialog \
-              --hidden-import=src.ui.add_account_dialog --hidden-import=src.core.registration_engine \
-              --hidden-import=src.core.account_manager --hidden-import=src.core.auth_injector \
-              --hidden-import=src.core.backend_api --hidden-import=src.core.cursor_api \
-              --hidden-import=src.core.email_handler --hidden-import=src.core.legacy_email_handler \
-              --hidden-import=src.core.drission_modules --hidden-import=src.core.drission_modules.account_storage \
-              --hidden-import=src.core.drission_modules.auto_register --hidden-import=src.core.drission_modules.browser_manager \
-              --hidden-import=src.core.drission_modules.card_pool_manager --hidden-import=src.core.drission_modules.country_codes \
-              --hidden-import=src.core.drission_modules.cursor_switcher --hidden-import=src.core.drission_modules.deep_token_getter \
-              --hidden-import=src.core.drission_modules.email_verification --hidden-import=src.core.drission_modules.machine_id_generator \
-              --hidden-import=src.core.drission_modules.payment_handler --hidden-import=src.core.drission_modules.phone_handler \
-              --hidden-import=src.core.drission_modules.registration_steps --hidden-import=src.core.drission_modules.token_handler \
-              --hidden-import=src.core.drission_modules.turnstile_handler --hidden-import=src.core.drission_modules.us_address_generator \
-              --hidden-import=src.utils.crypto --hidden-import=src.utils.app_paths \
-              --hidden-import=src.utils.version_checker --hidden-import=src.utils.license_monitor \
-              --hidden-import=src.utils.logger --hidden-import=utils.logger \
-              --hidden-import=src.utils.config --hidden-import=utils.config "$ENTRY"
-          else
-            echo "x86_64 environment not found; skipping x86_64 build."
-          fi
-          echo "x86_64 build step finished"
-
-      - name: Package zip/dmg (robust)
-        shell: bash
-        run: |
-          set -e
-          APPS=$(find dist -type d -name '*.app')
-          if [ -z "$APPS" ]; then
-            echo "No .app found in dist"; ls -la dist || true; exit 1
-          fi
-          for APP_PATH in $APPS; do
-            echo "Using app: $APP_PATH"
-            xattr -cr "$APP_PATH" || true
-            BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
-            ARCH="$(file -b "$BIN" | awk '{print $1}')"
-            SUFFIX="mac"
-            if echo "$ARCH" | grep -qi "x86_64"; then SUFFIX="mac-x86_64"; fi
-            if echo "$ARCH" | grep -qi "arm64"; then SUFFIX="mac-arm64"; fi
-            ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "CursorProManager-${SUFFIX}.zip"
-            hdiutil create -volname "CursorProManager" -srcfolder "$APP_PATH" -ov -format UDZO "CursorProManager-${SUFFIX}.dmg"
-          done
-          mkdir -p dist
-          echo "首次运行：将 .app 拷贝到 /Applications 后，右键选择打开；或在终端执行 xattr -dr com.apple.quarantine \"/Applications/CursorProManager.app\" 再打开。Apple Silicon 使用 arm64 包，Intel 使用 x86_64 包。" > dist/FirstRun.txt
-
-      - name: Smoke-run apps (offscreen)
-        shell: bash
-        run: |
-          set +e
-          APPS=$(find dist -type d -name '*.app')
-          if [ -z "$APPS" ]; then
-            echo "No .app for smoke-run"; exit 0
-          fi
-          for APP_PATH in $APPS; do
-            echo "【无界面健康检查】目标应用：$APP_PATH"
-            BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
-            ARCH="$(file -b "$BIN")"
-            echo "二进制路径：$BIN"
-            echo "二进制架构：$ARCH"
-            # 选择平台插件并设置 QT_PLUGIN_PATH
-            PLAT_DIR=""
-            for d in \
-              "$APP_PATH/Contents/MacOS/PyQt6/Qt6/plugins/platforms" \
-              "$APP_PATH/Contents/MacOS/Qt6/plugins/platforms" \
-              "$APP_PATH/Contents/Resources/PyQt6/Qt6/plugins/platforms" ; do
-              if [ -d "$d" ]; then PLAT_DIR="$d"; break; fi
-            done
-            PLUGIN_ROOT="$(dirname "$PLAT_DIR")"
-            PLATFORM="offscreen"
-            if [ -d "$PLAT_DIR" ] && ! ls "$PLAT_DIR" | grep -qi offscreen; then
-              PLATFORM="cocoa"
-            fi
-            echo "检测到平台插件目录：${PLAT_DIR:-<未找到>}"
-            echo "选择平台：$PLATFORM"
-            echo "以 $PLATFORM 模式启动，倒计时 5 秒观察初始化日志…"
-            QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" & PID=$!
-            for i in 5 4 3 2 1; do
-              echo "等待 ${i} 秒…"
-              sleep 1
-            done
-            echo "结束进程并收集退出状态…"
-            kill "$PID" 2>/dev/null || true
-            wait "$PID"; CODE=$?
-            echo "进程退出码：$CODE"
-            if [ "$CODE" -eq 143 ] || [ "$CODE" -eq 0 ]; then
-              echo "✅ 健康检查通过（应用已成功初始化，随后被测试脚本正常终止）"
-            else
-              echo "❌ 健康检查失败（退出码：$CODE）"
-              exit 1
-            fi
-          done
-
-      - name: 验证核心功能
-        shell: bash
-        run: |
-          set +e
-          APP_PATH="$(find dist -type d -name '*.app' | head -n1)"
-          if [ -z "$APP_PATH" ]; then
-            echo "未找到 .app"; exit 1
-          fi
-          BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
-          # 平台插件检测与选择
-          PLAT_DIR=""
-          for d in \
-            "$APP_PATH/Contents/MacOS/PyQt6/Qt6/plugins/platforms" \
-            "$APP_PATH/Contents/MacOS/Qt6/plugins/platforms" \
-            "$APP_PATH/Contents/Resources/PyQt6/Qt6/plugins/platforms" ; do
-            if [ -d "$d" ]; then PLAT_DIR="$d"; break; fi
-          done
-          PLUGIN_ROOT="$(dirname "$PLAT_DIR")"
-          PLATFORM="offscreen"
-          if [ -d "$PLAT_DIR" ] && ! ls "$PLAT_DIR" | grep -qi offscreen; then
-            PLATFORM="cocoa"
-          fi
-          echo "核心功能验证使用平台：$PLATFORM"
-          # 启动并捕获输出
-          OUT="/tmp/app_output.log"
-          : > "$OUT"
-          QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >"$OUT" 2>&1 & APP_PID=$!
-          for i in 5 4 3 2 1; do
-            echo "功能验证倒计时 ${i} 秒…"; sleep 1;
-          done
-          kill -TERM "$APP_PID" 2>/dev/null || true
-          # 最多再等待 5 秒，超时则强杀
-          for t in 1 2 3 4 5; do
-            if ! ps -p "$APP_PID" >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          if ps -p "$APP_PID" >/dev/null 2>&1; then
-            echo "进程未按时退出，发送 KILL"
-            kill -KILL "$APP_PID" 2>/dev/null || true
-          fi
-          wait "$APP_PID" 2>/dev/null || true
-          # 兜底清理可能遗留的子进程
-          pkill -f "$BIN" 2>/dev/null || true
-          echo "=== 功能验证 ==="
-          # 验证1: 在线校验文案
-          if grep -q "正在进行启动时在线校验" "$OUT"; then
-            echo "✅ 在线校验功能正常"
-          else
-            echo "❌ 在线校验功能可能有问题"; exit 1
-          fi
-          # 验证2: 日志系统
-          if grep -q "cursor_vip.LicenseValidator" "$OUT"; then
-            echo "✅ 日志系统正常"
-          else
-            echo "❌ 日志系统可能有问题"; exit 1
-          fi
-          # 验证3: 有 WARNING / INFO
-          if grep -q "WARNING" "$OUT" && grep -q "INFO" "$OUT"; then
-            echo "✅ 错误和警告处理正常"
-          else
-            echo "⚠️ 未检测到 WARNING/INFO 日志"
-          fi
-          # 验证4: 无崩溃痕迹
-          if ! grep -Eq "Traceback|Aborted|Segmentation fault" "$OUT"; then
-            echo "✅ 应用运行稳定，无崩溃"
-          else
-            echo "❌ 应用可能崩溃了"; exit 1
-          fi
-          echo "🎉 所有核心功能验证通过！"
-
-      - name: 交互按键冒烟测试
-        env:
-          UI_SMOKE_KEY: ${{ secrets.LICENSE_KEY }}
-          LICENSE_KEY_INPUT: ${{ inputs.license_key_input }}
-        shell: bash
-        run: |
-          set +e
-          APP_PATH="$(find dist -type d -name '*.app' | head -n1)"
-          if [ -z "$APP_PATH" ]; then
-            echo "未找到 .app"; exit 1
-          fi
-          BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
-          PLAT_DIR=""
-          for d in \
-            "$APP_PATH/Contents/MacOS/PyQt6/Qt6/plugins/platforms" \
-            "$APP_PATH/Contents/MacOS/Qt6/plugins/platforms" \
-            "$APP_PATH/Contents/Resources/PyQt6/Qt6/plugins/platforms" ; do
-            if [ -d "$d" ]; then PLAT_DIR="$d"; break; fi
-          done
-          PLUGIN_ROOT="$(dirname "$PLAT_DIR")"
-          PLATFORM="offscreen"
-          if [ -d "$PLAT_DIR" ] && ! ls "$PLAT_DIR" | grep -qi offscreen; then
-            PLATFORM="cocoa"
-          fi
-          OUT="/tmp/ui_smoke.log"
-          : > "$OUT"
-          echo "=== 交互按键冒烟测试（$PLATFORM） ==="
-          UI_KEY="${UI_SMOKE_KEY:-$LICENSE_KEY_INPUT}"
-          UI_KEY="${UI_KEY:-CI-TEST-DUMMY}"
-          QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" UI_SMOKE=1 UI_SMOKE_KEY="$UI_KEY" "$BIN" >"$OUT" 2>&1 & PID=$!
-          for i in 10 9 8 7 6 5 4 3 2 1; do
-            echo "交互测试倒计时 ${i} 秒…"; sleep 1;
-          done
-          kill -TERM "$PID" 2>/dev/null || true
-          for t in 1 2 3 4 5; do
-            if ! ps -p "$PID" >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          if ps -p "$PID" >/dev/null 2>&1; then
-            kill -KILL "$PID" 2>/dev/null || true
-          fi
-          wait "$PID" 2>/dev/null; CODE=$?
-          pkill -f "$BIN" 2>/dev/null || true
-          echo "--- 最近日志 ---"
-          tail -n 200 "$OUT" || true
-          echo "退出码：$CODE"
-          if grep -q "\\[UI_SMOKE\\] 点击:" "$OUT" || grep -q "\\[UI_SMOKE\\] 未找到目标控件" "$OUT" || grep -q "\\[UI_SMOKE\\] Hook 已加载" "$OUT" || grep -q "\\[UI_SMOKE\\] 已挂载定时器" "$OUT"; then
-            echo "✅ 冒烟 Hook 已执行"
-          else
-            echo "❌ 未捕获到冒烟日志"; exit 1
-          fi
-          if ! grep -Eq "Traceback|Aborted|Segmentation fault" "$OUT"; then
-            echo "✅ 无崩溃痕迹"
-          else
-            echo "❌ 存在崩溃痕迹"; exit 1
-          fi
-          if [ "$CODE" -eq 143 ] || [ "$CODE" -eq 0 ]; then
-            echo "✅ 交互按键冒烟测试通过"
-          else
-            echo "❌ 交互按键冒烟测试失败（退出码：$CODE）"; exit 1
-          fi
-
-      - name: 性能基准测试
-        shell: bash
-        run: |
-          set +e
-          APP_PATH="$(find dist -type d -name '*.app' | head -n1)"
-          if [ -z "$APP_PATH" ]; then
-            echo "未找到 .app"; exit 1
-          fi
-          BIN="$(find "$APP_PATH/Contents/MacOS" -type f | head -n1)"
-          # 平台插件检测与选择
-          PLAT_DIR=""
-          for d in \
-            "$APP_PATH/Contents/MacOS/PyQt6/Qt6/plugins/platforms" \
-            "$APP_PATH/Contents/MacOS/Qt6/plugins/platforms" \
-            "$APP_PATH/Contents/Resources/PyQt6/Qt6/plugins/platforms" ; do
-            if [ -d "$d" ]; then PLAT_DIR="$d"; break; fi
-          done
-          PLUGIN_ROOT="$(dirname "$PLAT_DIR")"
-          PLATFORM="offscreen"
-          if [ -d "$PLAT_DIR" ] && ! ls "$PLAT_DIR" | grep -qi offscreen; then
-            PLATFORM="cocoa"
-          fi
-          echo "=== 性能基准测试 ==="
-          echo "启动时间（近似）:"
-          time (
-            QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >/dev/null 2>&1 & PID=$!
-            sleep 3
-            kill -TERM "$PID" 2>/dev/null || true
-            for t in 1 2 3 4 5; do
-              if ! ps -p "$PID" >/dev/null 2>&1; then break; fi
-              sleep 1
-            done
-            if ps -p "$PID" >/dev/null 2>&1; then
-              kill -KILL "$PID" 2>/dev/null || true
-            fi
-            wait "$PID" 2>/dev/null || true
-          )
-          echo ""
-          echo "应用大小统计:"
-          du -sh "$APP_PATH" || true
-          echo "二进制文件大小:"
-          du -h "$BIN" || true
-          echo ""
-          echo "启动时内存使用（近似）:"
-          QT_PLUGIN_PATH="$PLUGIN_ROOT" QT_QPA_PLATFORM="$PLATFORM" "$BIN" >/dev/null 2>&1 & PID=$!
-          sleep 2
-          ps -p $PID -o rss=,vsz=,pcpu= 2>/dev/null || echo "进程已结束"
-          kill -TERM $PID 2>/dev/null || true
-          for t in 1 2 3 4 5; do
-            if ! ps -p "$PID" >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          if ps -p "$PID" >/dev/null 2>&1; then
-            kill -KILL "$PID" 2>/dev/null || true
-          fi
-          wait "$PID" 2>/dev/null || true
-          pkill -f "$BIN" 2>/dev/null || true
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CursorProManager-mac-all
-          path: |
-            CursorProManager-mac-arm64.zip
-            CursorProManager-mac-arm64.dmg
-            CursorProManager-mac-x86_64.zip
-            CursorProManager-mac-x86_64.dmg
-            dist/FirstRun.txt
-            dist/**/*.app
+if __name__ == "__main__":
+    main()
