@@ -41,15 +41,24 @@ jobs:
           done
           # 验证依赖安装
           python -c "
-          required = ['PyQt6', 'requests', 'PyJWT', 'cryptography', 'lxml', 'DrissionPage', 'psutil']
+          required = ['PyQt6', 'requests', 'jwt', 'cryptography', 'lxml', 'DrissionPage', 'psutil']
+          lib_names = {
+              'jwt': 'PyJWT',
+              'PyQt6': 'PyQt6',
+              'requests': 'requests',
+              'cryptography': 'cryptography',
+              'lxml': 'lxml',
+              'DrissionPage': 'DrissionPage',
+              'psutil': 'psutil'
+          }
           missing = []
           for lib in required:
               try:
                   __import__(lib)
-                  print(f'✅ {lib} 已安装')
+                  print(f'✅ {lib_names[lib]} 已安装')
               except ImportError:
-                  missing.append(lib)
-                  print(f'❌ {lib} 未安装')
+                  missing.append(lib_names[lib])
+                  print(f'❌ {lib_names[lib]} 未安装')
           if missing:
               print(f'⚠️ 缺少依赖: {missing}')
               exit(1)
@@ -71,15 +80,24 @@ jobs:
           arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -m pip install --progress-bar off --default-timeout=120 $PKGS
           # 验证 x86_64 环境的依赖安装
           arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -c "
-          required = ['PyQt6', 'requests', 'PyJWT', 'cryptography', 'lxml', 'DrissionPage', 'psutil']
+          required = ['PyQt6', 'requests', 'jwt', 'cryptography', 'lxml', 'DrissionPage', 'psutil']
+          lib_names = {
+              'jwt': 'PyJWT',
+              'PyQt6': 'PyQt6',
+              'requests': 'requests',
+              'cryptography': 'cryptography',
+              'lxml': 'lxml',
+              'DrissionPage': 'DrissionPage',
+              'psutil': 'psutil'
+          }
           missing = []
           for lib in required:
               try:
                   __import__(lib)
-                  print(f'✅ {lib} 已安装')
+                  print(f'✅ {lib_names[lib]} 已安装')
               except ImportError:
-                  missing.append(lib)
-                  print(f'❌ {lib} 未安装')
+                  missing.append(lib_names[lib])
+                  print(f'❌ {lib_names[lib]} 未安装')
           if missing:
               print(f'⚠️ 缺少依赖: {missing}')
               exit(1)
