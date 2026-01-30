@@ -24,34 +24,12 @@ def prune_qt_plugins(app_path: Path):
     tls_dir = plugins_dir / "tls"
     icon_dir = plugins_dir / "iconengines"
     plat_dir = plugins_dir / "platforms"
-    trans_dir = plugins_dir.parent.parent / "translations"
-    if trans_dir.exists():
-        shutil.rmtree(trans_dir, ignore_errors=True)
-    if plat_dir.exists():
-        keep = {"qcocoa.dylib", "libqcocoa.dylib", "qoffscreen.dylib", "libqoffscreen.dylib"}
-        for p in plat_dir.iterdir():
-            if p.is_file() and p.name.lower() not in keep:
-                try: p.unlink()
-                except: pass
-    if img_dir.exists():
-        keep = {"qpng.dylib","libqpng.dylib","qjpeg.dylib","libqjpeg.dylib","qsvg.dylib","libqsvg.dylib"}
-        for p in img_dir.iterdir():
-            if p.is_file() and p.name.lower() not in keep:
-                try: p.unlink()
-                except: pass
-    if tls_dir.exists():
-        keep = {"qsecuretransport.dylib","libqsecuretransport.dylib","qopensslbackend.dylib","libqopensslbackend.dylib"}
-        for p in tls_dir.iterdir():
-            if p.is_file() and p.name.lower() not in keep:
-                try: p.unlink()
-                except: pass
-    if icon_dir.exists():
-        keep = {"qsvgicon.dylib","libqsvgicon.dylib"}
-        for p in icon_dir.iterdir():
-            if p.is_file() and p.name.lower() not in keep:
-                try: p.unlink()
-                except: pass
-    print("✅ 已精简 Qt 插件")
+    print("✅ 保留所有必要的 Qt 插件，避免运行时崩溃")
+    # 不再删除翻译文件，它们可能包含必要的本地化信息
+    # 不再精简平台插件，保留所有可能需要的插件
+    # 不再精简图像格式插件，保留所有可能需要的插件
+    # 不再精简 TLS 插件，保留所有可能需要的插件
+    # 不再精简图标引擎插件，保留所有可能需要的插件
 
 def get_add_data_paths(project_root: Path):
     """获取需要打包的数据文件路径"""
@@ -61,12 +39,9 @@ def get_add_data_paths(project_root: Path):
     primary_db = project_root / 'data' / 'accounts.db'
     secondary_db = project_root / 'src' / 'data' / 'accounts.db'
     
-    # 注意：在 macOS 上，PyInstaller 使用分号 (;) 作为分隔符
-    # 但系统路径分隔符是冒号 (:)，所以这里容易混淆
-    
     # 优先使用主位置的数据库
     if primary_db.exists():
-        # macOS 上正确的语法是分号分隔
+        # macOS 上 PyInstaller 使用分号作为分隔符
         add_data_args.append(f'--add-data={primary_db}:data')
         print(f"✅ 包含数据库文件 (主位置): {primary_db}")
     elif secondary_db.exists():
@@ -85,19 +60,52 @@ def get_add_data_paths(project_root: Path):
         src_path = project_root / src
         if src_path.exists():
             if src_path.is_dir():
-                # 目录：使用分号分隔
                 add_data_args.append(f'--add-data={src_path}:{dest}')
             else:
-                # 文件：使用分号分隔
                 add_data_args.append(f'--add-data={src_path}:{dest}')
             print(f"✅ 包含资源: {src} -> {dest}")
     
     return add_data_args
 
+def check_dependencies():
+    """检查关键依赖库是否存在"""
+    print("🔍 检查依赖库完整性...")
+    
+    required_libs = [
+        'PyQt6',
+        'requests',
+        'PyJWT',
+        'cryptography',
+        'lxml',
+        'DrissionPage',
+        'psutil'
+    ]
+    
+    missing_libs = []
+    for lib in required_libs:
+        try:
+            __import__(lib)
+            print(f"✅ {lib} 已安装")
+        except ImportError:
+            missing_libs.append(lib)
+            print(f"❌ {lib} 未安装")
+    
+    if missing_libs:
+        print(f"⚠️ 缺少以下依赖库: {', '.join(missing_libs)}")
+        print("建议运行: pip install " + ' '.join(missing_libs))
+    else:
+        print("🎉 所有依赖库检查通过")
+    
+    return len(missing_libs) == 0
+
 def main():
     if sys.platform != "darwin":
         print("❌ 仅在 macOS 上运行此脚本")
         sys.exit(1)
+    
+    # 检查依赖库完整性
+    if not check_dependencies():
+        print("⚠️ 依赖库检查失败，继续构建但可能会出现问题")
     
     project_root = Path(__file__).resolve().parent
     dist_dir = project_root / "dist"
