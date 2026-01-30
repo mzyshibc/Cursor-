@@ -39,6 +39,25 @@ jobs:
           for i in 1 2 3; do
             python -m pip install --progress-bar off --default-timeout=120 $PKGS && break || { echo "retry..."; sleep 10; }
           done
+          # 验证依赖安装
+          python -c "
+          required = ['PyQt6', 'requests', 'PyJWT', 'cryptography', 'lxml', 'DrissionPage', 'psutil']
+          missing = []
+          for lib in required:
+              try:
+                  __import__(lib)
+                  print(f'✅ {lib} 已安装')
+              except ImportError:
+                  missing.append(lib)
+                  print(f'❌ {lib} 未安装')
+          if missing:
+              print(f'⚠️ 缺少依赖: {missing}')
+              exit(1)
+          else:
+              print('🎉 所有依赖安装成功')
+          "
+          # 显示安装的包版本
+          python -m pip list | grep -E "PyQt6|requests|PyJWT|cryptography|lxml|DrissionPage|psutil|pyinstaller"
 
       - name: Setup Rosetta and x86_64 Python (Miniconda)
         shell: bash
@@ -50,6 +69,25 @@ jobs:
           "$HOME/miniconda-x86_64/bin/conda" create -y -n py311 python=3.11
           PKGS="pyinstaller PyQt6 requests PyJWT cryptography lxml DrissionPage pyinstaller-hooks-contrib psutil"
           arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -m pip install --progress-bar off --default-timeout=120 $PKGS
+          # 验证 x86_64 环境的依赖安装
+          arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -c "
+          required = ['PyQt6', 'requests', 'PyJWT', 'cryptography', 'lxml', 'DrissionPage', 'psutil']
+          missing = []
+          for lib in required:
+              try:
+                  __import__(lib)
+                  print(f'✅ {lib} 已安装')
+              except ImportError:
+                  missing.append(lib)
+                  print(f'❌ {lib} 未安装')
+          if missing:
+              print(f'⚠️ 缺少依赖: {missing}')
+              exit(1)
+          else:
+              print('🎉 所有依赖安装成功')
+          "
+          # 显示 x86_64 环境安装的包版本
+          arch -x86_64 "$HOME/miniconda-x86_64/bin/conda" run -n py311 python -m pip list | grep -E "PyQt6|requests|PyJWT|cryptography|lxml|DrissionPage|psutil|pyinstaller"
 
       - name: Unpack sources
         shell: bash
