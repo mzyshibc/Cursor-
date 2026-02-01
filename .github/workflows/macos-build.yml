@@ -33,8 +33,24 @@ jobs:
       - name: Build Obfuscated App (Native M1 arm64)
         run: |
           echo "开始混淆打包流程 (Cython + PyInstaller)..."
-          # 使用适配 GitHub 路径的构建脚本
-          python github_m1_build/build_obfuscated_mac.py
+          
+          LICENSE_ARG=""
+          if [ -n "${{ github.event.inputs.license_key }}" ]; then
+            echo "检测到输入授权码，准备执行自动化激活测试..."
+            LICENSE_ARG="--activate ${{ github.event.inputs.license_key }}"
+          fi
+
+          # 自动寻找脚本位置：先找根目录，再找子文件夹
+          if [ -f "build_obfuscated_mac.py" ]; then
+            python build_obfuscated_mac.py $LICENSE_ARG
+          elif [ -f "github_m1_build/build_obfuscated_mac.py" ]; then
+            python github_m1_build/build_obfuscated_mac.py $LICENSE_ARG
+          else
+            echo "❌ 错误：未找到构建脚本 build_obfuscated_mac.py"
+            # 列出当前目录结构帮助调试
+            ls -R
+            exit 1
+          fi
 
       - name: Smoke Test (Offscreen)
         run: |
@@ -50,7 +66,7 @@ jobs:
           env QT_QPA_PLATFORM=offscreen "$APP_BIN" & PID=$!
           sleep 10
           if kill -0 $PID 2>/dev/null; then
-            echo "✅ 冒烟测试通过：程序运行正常，未发生即时闪退"
+            echo "✅ 冒烟测试通过：程序运行正常"
             kill $PID
           else
             echo "❌ 冒烟测试失败：程序在启动后 10 秒内崩溃"
