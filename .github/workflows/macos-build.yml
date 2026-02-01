@@ -7,7 +7,6 @@ on:
 
 jobs:
   build-m1:
-    # 强制使用原生 M1 (Apple Silicon) 运行器
     runs-on: macos-14
     
     steps:
@@ -28,37 +27,40 @@ jobs:
       - name: Build Obfuscated App (Native M1 arm64)
         run: |
           echo "开始混淆打包流程 (Cython + PyInstaller)..."
-          # 使用适配 GitHub 路径的构建脚本
-          python github_m1_build/build_obfuscated_mac.py
+          # 自动寻找脚本位置：先找根目录，再找文件夹
+          if [ -f "build_obfuscated_mac.py" ]; then
+            python build_obfuscated_mac.py
+          elif [ -f "github_m1_build/build_obfuscated_mac.py" ]; then
+            python github_m1_build/build_obfuscated_mac.py
+          else
+            echo "❌ 错误：未找到构建脚本 build_obfuscated_mac.py"
+            exit 1
+          fi
 
       - name: Smoke Test (Offscreen)
         run: |
           echo "启动冒烟测试验证程序可用性..."
-          # 寻找生成的二进制文件
           APP_BIN=$(find dist -type f -perm +111 -path "*/Contents/MacOS/*" | head -n 1)
           if [ -z "$APP_BIN" ]; then
             echo "❌ 错误：未找到生成的二进制程序"
             exit 1
           fi
           echo "✅ 找到程序: $APP_BIN"
-          # 离屏运行 10 秒测试是否闪退
           env QT_QPA_PLATFORM=offscreen "$APP_BIN" & PID=$!
           sleep 10
           if kill -0 $PID 2>/dev/null; then
-            echo "✅ 冒烟测试通过：程序运行正常，未发生即时闪退"
+            echo "✅ 冒烟测试通过"
             kill $PID
           else
-            echo "❌ 冒烟测试失败：程序在启动后 10 秒内崩溃"
+            echo "❌ 冒烟测试失败：程序启动崩溃"
             exit 1
           fi
 
       - name: Package Artifacts
         run: |
           echo "正在打包产物..."
-          # 寻找 .app 目录
           APP_PATH=$(find dist -maxdepth 1 -type d -name "CursorProManager_M1_*.app" | head -n 1)
           APP_NAME=$(basename "$APP_PATH")
-          # 移除扩展属性并压缩
           xattr -cr "$APP_PATH"
           cd dist
           zip -r "../${APP_NAME}.zip" "$APP_NAME"
