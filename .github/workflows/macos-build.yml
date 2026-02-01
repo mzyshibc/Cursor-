@@ -52,9 +52,9 @@ jobs:
             exit 1
           fi
 
-      - name: Smoke Test (Offscreen)
+      - name: Smoke Test & Activation Verification
         run: |
-          echo "启动冒烟测试验证程序可用性..."
+          echo "启动冒烟测试并验证激活状态..."
           # 寻找生成的二进制文件
           APP_BIN=$(find dist -type f -perm +111 -path "*/Contents/MacOS/*" | head -n 1)
           if [ -z "$APP_BIN" ]; then
@@ -62,16 +62,34 @@ jobs:
             exit 1
           fi
           echo "✅ 找到程序: $APP_BIN"
-          # 离屏运行 10 秒测试是否闪退
+          
+          # 启动程序 (离屏模式)
           env QT_QPA_PLATFORM=offscreen "$APP_BIN" & PID=$!
+          
+          echo "等待 10 秒进行运行观察..."
           sleep 10
+          
           if kill -0 $PID 2>/dev/null; then
             echo "✅ 冒烟测试通过：程序运行正常"
+            # 停止程序
             kill $PID
+            wait $PID 2>/dev/null || true
           else
             echo "❌ 冒烟测试失败：程序在启动后 10 秒内崩溃"
             exit 1
           fi
+
+      - name: Cleanup Activation Data (Ensure Clean Package)
+        if: always()
+        run: |
+          echo "正在清理激活痕迹，确保分发包纯净..."
+          # 运行 cleanup 脚本
+          if [ -f "build_obfuscated_mac.py" ]; then
+            python build_obfuscated_mac.py --cleanup
+          elif [ -f "github_m1_build/build_obfuscated_mac.py" ]; then
+            python github_m1_build/build_obfuscated_mac.py --cleanup
+          fi
+          echo "✅ 清理完成"
 
       - name: Package Artifacts
         run: |
