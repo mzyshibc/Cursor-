@@ -116,10 +116,43 @@ def perform_activation(project_root: Path, license_key: str):
         import traceback
         traceback.print_exc()
 
+def cleanup_activation(project_root: Path):
+    """清除构建环境下的激活信息，确保产物纯净"""
+    print_step("执行激活信息清理")
+    try:
+        from utils.app_paths import get_app_data_dir
+        config_dir = get_app_data_dir()
+        license_file = config_dir / 'license.dat'
+        if license_file.exists():
+            license_file.unlink()
+            print(f"🗑️ 已删除激活文件: {license_file}")
+        
+        # 同时检查当前目录下的 data/license.dat (以防万一)
+        alt_license = project_root / 'data' / 'license.dat'
+        if alt_license.exists():
+            alt_license.unlink()
+            print(f"🗑️ 已删除备用激活文件: {alt_license}")
+            
+    except Exception as e:
+        print(f"⚠️ 清理激活信息时发生错误: {e}")
+
 def main():
     parser = argparse.ArgumentParser(description="M1 Obfuscated Build Script")
     parser.add_argument("--activate", help="在打包前执行授权码激活测试")
+    parser.add_argument("--cleanup", action="store_true", help="清理激活信息")
     args, unknown = parser.parse_known_args()
+
+    # 如果只是清理请求
+    if args.cleanup:
+        # 智能定位项目根目录
+        current_script_dir = Path(__file__).resolve().parent
+        if (current_script_dir / "src").exists() or (current_script_dir / "src.zip").exists():
+            project_root = current_script_dir
+        else:
+            project_root = current_script_dir.parent
+        sys.path.insert(0, str(project_root / "src"))
+        cleanup_activation(project_root)
+        return
 
     print_step("启动 M1 (Apple Silicon) 原生构建流程")
     
